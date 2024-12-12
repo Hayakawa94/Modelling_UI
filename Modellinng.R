@@ -2,7 +2,7 @@ source("H:/Restricted Share/DA P&U/Tech Modelling/Users/Khoa/RPMtools/RPMtools.R
 
 
 
-df_eng_sample <- fread("xgb_modelling_data_300k.csv")
+df_eng_sample <- fread("df_eng_sample.csv")
 df_eng_sample <- df_eng_sample %>% sample_n(100000)
 fts<- readRDS("fts.rds")
 model_spec <-list(ad_f_b = list(exposure = 'freqexposure_adbclaim',
@@ -136,33 +136,46 @@ model_spec <-list(ad_f_b = list(exposure = 'freqexposure_adbclaim',
 
 
 # Shuffle the dataset
-df_eng_sample <- df_eng_sample[sample(nrow(df_eng_sample)), ]
-
-# Define the split ratios
-train_ratio <- 0.6
-validate_ratio <- 0.2
-holdout_ratio <- 0.2
-
-# Calculate the indices for each set
-train_index <- 1:floor(train_ratio * nrow(df_eng_sample))
-validate_index <- (max(train_index) + 1):(max(train_index) + floor(validate_ratio * nrow(df_eng_sample)))
-holdout_index <- (max(validate_index) + 1):nrow(df_eng_sample)
-
-# Split the data
-train <- df_eng_sample[train_index, ]
-validate <- df_eng_sample[validate_index, ]
-holdout <- df_eng_sample[holdout_index, ]
+# df_eng_sample <- df_eng_sample[sample(nrow(df_eng_sample)), ]
 
 
 
-
-
+KT_create_sample <- function(df , weight, y, kfold , train_validate_split= 0.8){
+  set.seed(1)
+  if (!missing(kfold)){
+    KT_create_fold_idx(df,k = kfold) -> kfold_idx
+    train <- df
+    train_y <- y
+    train_weight <- weight
+    return(list(train = train , 
+                train_y= train_y , 
+                train_weight=train_weight,
+                kfold_idx = kfold_idx))
+  }else{
+    kfold_idx =NULL
+    idx <- sample(seq_len(nrow(df)), size = 0.8 * nrow(df))
+    train <- df[idx, ]
+    train_y <- y[idx]
+    train_weight <- weight[idx]
+    validate <- df[-idx, ]
+    validate_y <- y[-idx]
+    validate_weight <- weight[-idx]
+    return(list(train = train , 
+                train_y= train_y , 
+                train_weight=train_weight,
+                validate_y=validate_y ,
+                validate_weight=validate_weight, 
+                validate = validate))
+  }
+ 
+}
 
 # xgb doesn't like cat variables so need to OHE
 tune_model <- function(fts,
-                        model,
+                       model,
                        train ,
-                       validate ,
+                       kfold=0,
+                       train_validate_ratio=0.8,
                        eta = c(0.01, 0.1),
                        max_depth = c(2L, 5L),
                        min_child_weight = c(1, 100),
@@ -186,10 +199,14 @@ tune_model <- function(fts,
   train <- train[train[[weight]] >0 ]
   train_y <- train[[response]]
   train_weight <- train[[weight]]
-  validate <- validate[validate[[weight]] >0 ]
-  validate_y <- validate[[response]]
-  validate_weight <- validate[[weight]]
-  # bounds <- append(bounds)
+  
+  if (kfold>0){
+    KT_create_sample(df = train, weight = train_weight, y = train_y, kfold = kfold   ) -> sample_result
+  }else{
+    KT_create_sample(df = train, weight = train_weight, y = train_y, train_validate_split =  train_validate_ratio ) -> sample_result
+  }
+  
+
   
   if(missing(monotonicity_constraints)){
     monotonicity_constraints= rep(0,nrow(train)) 
@@ -210,44 +227,73 @@ tune_model <- function(fts,
   lapply(bounds, function(x) if(x[1] == x[2]){x[1]} else{NULL}  ) %>% setNames(names(bounds))  %>% compact() -> fixed_param
   lapply(bounds, function(x) if(x[1] == x[2]){NULL} else{x}  ) %>% setNames(names(bounds))  %>% compact() -> bounds
   
-  
-  KT_xgb_baysian_tune(train = train %>% select(fts),
-                      train_y = train_y,
-                      train_weight = train_weight,
-                      validate = validate %>%  select(fts),
-                      validate_y = validate_y,
-                      validate_weight = validate_weight,
-                      bounds = bounds,HP_fixed = fixed_param,
-                      monotonicity_constraints=monotonicity_constraints , 
-                      interaction_constraints=interaction_constraints,
-                      nrounds = nrounds,
-                      objective =objective,
-                      eval_metric = eval_metric,
-                      parallel =parallel,
-                      iters.k = iters.k,
-                      iters.n = 4,
-                      ncluster = ncluster , 
-                      initPoints =  initPoints )
+  if (kfold > 0){
+    
+    KT_xgb_baysian_tune(train =  sample_result$train %>% select(fts),
+                        train_y =  sample_result$train_y,
+                        train_weight =  sample_result$train_weight,
+                        folds = sample_result$kfold,
+                        
+                        bounds = bounds,
+                        HP_fixed = fixed_param,
+                        monotonicity_constraints=monotonicity_constraints , 
+                        interaction_constraints=interaction_constraints,
+                        nrounds = nrounds,
+                        objective =objective,
+                        eval_metric = eval_metric,
+                        parallel =parallel,
+                        iters.k = iters.k,
+                        iters.n = 4,
+                        ncluster = ncluster , 
+                        initPoints =  initPoints )
+  }else{
+    
+    KT_xgb_baysian_tune(train =  sample_result$train %>% select(fts),
+                        train_y =  sample_result$train_y,
+                        train_weight =  sample_result$train_weight,
+                        validate =  sample_result$validate %>%  select(fts),
+                        validate_y =  sample_result$validate_y,
+                        validate_weight =  sample_result$validate_weight,
+                        bounds = bounds,
+                        HP_fixed = fixed_param,
+                        monotonicity_constraints=monotonicity_constraints , 
+                        interaction_constraints=interaction_constraints,
+                        nrounds = nrounds,
+                        objective =objective,
+                        eval_metric = eval_metric,
+                        parallel =parallel,
+                        iters.k = iters.k,
+                        iters.n = 4,
+                        ncluster = ncluster , 
+                        initPoints =  initPoints )
+  }
+
   
 }
 
-target_cols <- df_eng_sample %>% select(starts_with(c("freq" , "sev" , "exposure"))) %>%  names()
-df_eng_sample %>% select(-target_cols) %>% select_if(~is.numeric(.) ) %>% names -> fts
- 
-# tune_model(fts = fts,  model = "eow_f_b",train = train ,validate = validate) -> test
+# target_cols <- df_eng_sample %>% select(starts_with(c("freq" , "sev" , "exposure"))) %>%  names()
+# df_eng_sample %>% select(-target_cols) %>% select_if(~is.numeric(.) ) %>% names -> fts
+
+start = Sys.time()
+tune_model(fts = fts, kfold = 4, model = "eow_f_b",train = df_eng_sample) -> test
+Sys.time() -start
+
 library(shiny)
 library(rhandsontable)
 library(plotly)
 library(DT)
+
 ui <- fluidPage(
   titlePanel("Tick Box Table with Duplicate Tabs"),
   tabsetPanel(
     tabPanel("Feature Spec",
              sidebarLayout(
-               sidebarPanel(actionButton("reset_table", "Reset Table"),
-                            actionButton("load_feature", "Load Feature Spec"),
-                            actionButton("save_feature", "Save Feature Spec"),
-                            textInput("file_name_feature", "File Name", value = "feature_spec")),
+               sidebarPanel(
+                 actionButton("reset_table", "Reset Table"),
+                 actionButton("load_feature", "Load Feature Spec"),
+                 actionButton("save_feature", "Save Feature Spec"),
+                 textInput("file_name_feature", "File Name", value = "feature_spec")
+               ),
                mainPanel(
                  textOutput("action_message_feature"),
                  rHandsontableOutput("ft_table")
@@ -260,24 +306,32 @@ ui <- fluidPage(
                  actionButton("load_tuning", "Load Tuning"),
                  actionButton("save_tuning", "Save Tuning"),
                  textInput("file_name_tuning", "File Name", value = "tuning"),
-                 checkboxInput("Distribute_Computaion" ,"Distribute Computaion" , value = T),
-                 
+                 checkboxInput("Distribute_Computation", "Distribute Computation", value = TRUE),
+                 br(), 
+                 actionButton("Sampling", "Sampling"),
+                 conditionalPanel(
+                   condition = "input.Sampling % 2 == 1",
+                   checkboxInput("Trainvalidate", "Train Validate Split", value = TRUE),
+                   sliderInput("Ratio", "Ratio:", min = 0.5, max = 1, value = 0.8, step = 0.001),
+                   checkboxInput("kfold", "kfold", value = F),
+                   sliderInput("kfold_val", "Select numner of fold:", min = 2, max = 10, value = 5, step = 1)
+                 )
+               ,
                  br(),  # Line break for spacing
                  selectInput("model", "Select Model", choices = names(model_spec)),
-                 actionButton("tune", "Tune_model"),
+                 actionButton("tune", "Tune Model"),
                  actionButton("Select_HP_bounds", "HP Bounds"),
                  conditionalPanel(
                    condition = "input.Select_HP_bounds % 2 == 1",
-                   sliderInput("eta", "Learning Rate (eta):", min = 0.001, max = 0.3, value = c(0.001,0.1), step = 0.001),
-                   sliderInput("min_child_weight", "Minimum Child Weight:", min = 0.0001, max = 0.1, value = c(0.0001,0.01), step = 0.0001),
-                   sliderInput("max_depth", "Max Depth:", min = 1, max = 15, value = c(1,5), step = 1),
-                   sliderInput("alpha", "alpha (L1 regularization):", min = 0, max = 1, value = c(0.001,0.2), step = 0.001),
-                   sliderInput("lambda", "lambda (L2 regularization):", min = 0, max = 10, value = c(0.001,2), step = 0.01),
-                   sliderInput("colsample_bytree", "colsample bytree:", min = 0.1, max = 1, value = c(0.2,0.4), step = 0.01),
-                   sliderInput("subsample", "Subsample:", min = 0.1, max = 1, value = c(0.2,0.4), step = 0.01),
+                   sliderInput("eta", "Learning Rate (eta):", min = 0.001, max = 0.3, value = c(0.001, 0.1), step = 0.001),
+                   sliderInput("min_child_weight", "Minimum Child Weight:", min = 0.0001, max = 0.1, value = c(0.0001, 0.01), step = 0.0001),
+                   sliderInput("max_depth", "Max Depth:", min = 1, max = 15, value = c(1, 5), step = 1),
+                   sliderInput("alpha", "alpha (L1 regularization):", min = 0, max = 1, value = c(0.001, 0.2), step = 0.001),
+                   sliderInput("lambda", "lambda (L2 regularization):", min = 0, max = 10, value = c(0.001, 2), step = 0.01),
+                   sliderInput("colsample_bytree", "colsample bytree:", min = 0.1, max = 1, value = c(0.2, 0.4), step = 0.01),
+                   sliderInput("subsample", "Subsample:", min = 0.1, max = 1, value = c(0.2, 0.4), step = 0.01),
                    sliderInput("nrounds", "Number of Rounds:", min = 10, max = 500, value = 100)
                  )
-                 
                ),
                mainPanel(
                  tabsetPanel(
@@ -293,9 +347,24 @@ ui <- fluidPage(
                  textOutput("action_message_tuning")
                )
              )
+    ),
+    tabPanel("Train Model",
+             sidebarLayout(
+               sidebarPanel(
+                 actionButton("reset_table", "Reset Table"),
+                 actionButton("load_feature", "Load Feature Spec"),
+                 actionButton("save_feature", "Save Feature Spec"),
+                 textInput("file_name_feature", "File Name", value = "feature_spec")
+               ),
+               mainPanel(
+                 textOutput("action_message_feature"),
+                 rHandsontableOutput("ft_table")
+               )
+             )
     )
   )
 )
+
 server <- function(input, output, session) {
   initial_data <- data.frame(
     Features = fts,
@@ -323,13 +392,19 @@ server <- function(input, output, session) {
   
   tune_result <- eventReactive(input$tune, {
     gc()
+    if (input$kfold ){
+      kfold = input$kfold_val
+    }else{
+      kfold = 0
+    }
     req(input$ft_table)
     ft_spec_table <- hot_to_r(input$ft_table)
     fts_to_tune <- ft_spec_table$Features[which(ft_spec_table$Use_Feature == TRUE)]
     tune_model(fts = fts_to_tune,
                model = input$model,
                train = train,
-               validate = validate,
+               kfold = kfold,
+               train_validate_ratio = input$Ratio,
                eta = input$eta,
                max_depth = input$max_depth,
                min_child_weight = input$min_child_weight,
