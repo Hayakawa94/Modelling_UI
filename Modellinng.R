@@ -234,7 +234,7 @@ tune_model <- function(fts,
 target_cols <- df_eng_sample %>% select(starts_with(c("freq" , "sev" , "exposure"))) %>%  names()
 df_eng_sample %>% select(-target_cols) %>% select_if(~is.numeric(.) ) %>% names -> fts
  
-tune_model(fts = fts,  model = "eow_f_b",train = train ,validate = validate) -> test
+# tune_model(fts = fts,  model = "eow_f_b",train = train ,validate = validate) -> test
 library(shiny)
 library(rhandsontable)
 library(plotly)
@@ -260,8 +260,11 @@ ui <- fluidPage(
                  actionButton("load_tuning", "Load Tuning"),
                  actionButton("save_tuning", "Save Tuning"),
                  textInput("file_name_tuning", "File Name", value = "tuning"),
+                 checkboxInput("Distribute_Computaion" ,"Distribute Computaion" , value = T),
+                 
                  br(),  # Line break for spacing
                  selectInput("model", "Select Model", choices = names(model_spec)),
+                 actionButton("tune", "Tune_model"),
                  actionButton("Select_HP_bounds", "HP Bounds"),
                  conditionalPanel(
                    condition = "input.Select_HP_bounds % 2 == 1",
@@ -273,8 +276,8 @@ ui <- fluidPage(
                    sliderInput("colsample_bytree", "colsample bytree:", min = 0.1, max = 1, value = c(0.2,0.4), step = 0.01),
                    sliderInput("subsample", "Subsample:", min = 0.1, max = 1, value = c(0.2,0.4), step = 0.01),
                    sliderInput("nrounds", "Number of Rounds:", min = 10, max = 500, value = 100)
-                 ),
-                 actionButton("tune", "Tune_model")
+                 )
+                 
                ),
                mainPanel(
                  tabsetPanel(
@@ -319,6 +322,7 @@ server <- function(input, output, session) {
   })
   
   tune_result <- eventReactive(input$tune, {
+    gc()
     req(input$ft_table)
     ft_spec_table <- hot_to_r(input$ft_table)
     fts_to_tune <- ft_spec_table$Features[which(ft_spec_table$Use_Feature == TRUE)]
@@ -333,7 +337,7 @@ server <- function(input, output, session) {
                colsample_bytree = input$colsample_bytree,
                lambda = input$lambda,
                alpha = input$alpha,
-               nrounds = input$nrounds)
+               nrounds = input$nrounds,parallel = input$Distribute_Computaion)
   })
   
   output$tune_iteration_plot <- renderPlotly({
