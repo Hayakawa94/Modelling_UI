@@ -1,6 +1,5 @@
-source("H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelling_ui/Reactive_calc.R")
-source("H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelling_ui/UI.R")
 
+source("H:/Restricted Share/DA P&U/Tech Modelling/Users/Khoa/RPMtools/RPMtools.R")
 # Reason for modelling  GBM in R
 # Better modelling experience in general
 # 1. Fitting raw data i.e. more predictive than banded data
@@ -79,7 +78,14 @@ source("H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelli
 # train<-df
 # fts<- num_fts
 # train <- fread("C:\\Users\\Khoa.Truong\\Work\\P2_ui_DATA\\train.csv")
-# fts <- train %>% select(starts_with("num") )%>% names
+# set.seed(1)
+# train %>% sample_frac(0.2) -> train
+# train$none = "NA"
+# fts <- train %>% select(starts_with("num") )%>% names %>% sort
+source("H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelling_ui/UI.R")
+
+source("H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelling_ui/Reactive_calc.R")
+
 server <- function(input, output, session) {
   initial_data <- data.frame(
     Features = fts,
@@ -265,9 +271,9 @@ server <- function(input, output, session) {
       shap_values(model_output$shap_values)
       
       ft_imp <- model_output$imp_plot$imp_shap$data$variable
-      updateSelectInput(session, "SHAP_ft", choices = ft_imp)
-      updateSelectInput(session, "SHAP_X_ft1", choices = ft_imp)
-      updateSelectInput(session, "SHAP_X_ft2", choices = ft_imp)
+      updateSelectInput(session, "SHAP_ft", choices = sort( ft_imp))
+      updateSelectInput(session, "SHAP_X_ft1", choices = sort( ft_imp))
+      updateSelectInput(session, "SHAP_X_ft2", choices = sort( ft_imp))
       output$Shap_value_loaded <- renderText("Shap_Value loaded.")
     }else{
       output$Shap_value_loaded <- renderText("File not found.")
@@ -314,14 +320,12 @@ server <- function(input, output, session) {
   })
   
 
-# Update the slider based on the number of trees in the model
   observeEvent(train_result(), {
     model <- train_result()$model
     trained_model(model)
     updateSliderInput(session, "tree_index", max = model$niter - 1)
   })
 
-  # Render the tree plot
   output$tree_plot <- DiagrammeR::renderGrViz({
     req(trained_model())
     model <- trained_model()
@@ -381,13 +385,7 @@ server <- function(input, output, session) {
   output$SHAP_imp_plot <-renderPlotly({
      ggplotly( train_result()$imp_plot$imp_shap)%>% layout( height = 1000 )
   })
-  # 
-  # output$Interaction_matrix <-renderPlot({
-  #   plot(train_result()$imp_plot$EIXinteraction_gain_matrix) +  theme(axis.text.x = element_text(size = 19),
-  #                                                       axis.text.y = element_text(size = 19),
-  #                                                     legend.title = element_text(size = 19),
-  #                                                     legend.text = element_text(size = 19))
-  # })
+
   
   output$Interaction_matrix <-renderPlotly({
     
@@ -395,6 +393,8 @@ server <- function(input, output, session) {
      melt(id.vars = "Parent") %>%
      filter(!is.na(value)) %>%
      rename(Child = variable, sumGain = value) %>%
+     arrange(-sumGain) %>%
+     head(input$top_gain_X) %>%
      ggplot(aes(x = Child, y = Parent, fill = sumGain))+
      geom_tile() +
      scale_fill_gradientn(colors =c( "aliceblue", "lightblue", "blue"))+
@@ -403,6 +403,20 @@ server <- function(input, output, session) {
 
      
    
+  })
+  
+  
+  output$SHAP_Interaction_matrix <-renderPlotly({
+    ggplotly(train_result()$imp_plot$imp_shap_X %>% 
+               head(input$top_shap_X) %>%
+               ggplot(.,aes(x = ft , y = interaction , fill = value)) + 
+               geom_tile() + 
+               scale_fill_gradientn(colors =c( "aliceblue", "lightblue", "blue"))+
+               theme_light()+
+               theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=0.9)) ) %>% 
+      layout( height = 1000,width = 1000 )
+    
+    
   })
   
   observeEvent(train_result(), {
@@ -527,6 +541,7 @@ server <- function(input, output, session) {
       train_nrounds = input$train_nrounds,
       train_Ratio = input$train_Ratio,
       train_kfold_val = input$train_kfold_val,
+      train_use_early_stopping_rounds = input$use_early_stopping_rounds,
       model_output = train_result()
     ), file_name)
     
@@ -548,12 +563,93 @@ server <- function(input, output, session) {
       updateSliderInput(session, "train_nrounds", value = loaded_state$train_nrounds)
       updateSliderInput(session, "train_Ratio", value = loaded_state$train_Ratio)
       updateSliderInput(session, "train_kfold_val", value = loaded_state$train_kfold_val)
-      updateSliderInput(session, "train_gamma", value = loaded_state$nrounds)
+      updateSliderInput(session, "train_gamma", value = loaded_state$train_gamma)
+      updateSliderInput(session, "use_early_stopping_rounds", value = loaded_state$train_use_early_stopping_rounds)
+      updateSliderInput(session, "tree_index", max = loaded_state$model_output$model$niter -1)
+      # Trigger the rendering of plots
+      output$Gain_imp_plot <- renderPlotly({
+        ggplotly(loaded_state$model_output$imp_plot$imp_gain + theme_light()) %>% layout(height = 1000)
+      })
+      
+      output$SHAP_imp_plot <- renderPlotly({
+        ggplotly(loaded_state$model_output$imp_plot$imp_shap) %>% layout(height = 1000)
+      })
+      
+      output$gain <- renderPlot({
+        plot(loaded_state$model_output$imp_plot$EIX_gain, top = input$topfeatures, text_size = 6) + theme(
+          legend.text = element_text(size = 17),
+          legend.title = element_text(size = 17)
+        )
+      })
+      
+      output$gain2 <- renderPlot({
+        plot(loaded_state$model_output$imp_plot$EIX_gain,
+             top = input$topfeatures,
+             xmeasure = input$x_axis,
+             ymeasure = input$y_axis,
+             radar = FALSE)
+      })
+      
+      output$Interaction_matrix <- renderPlotly({
+        ggplotly(
+          dcast(loaded_state$model_output$imp_plot$EIXinteraction_gain_matrix, Parent ~ Child, value.var = "sumGain") %>%
+            melt(id.vars = "Parent") %>%
+            filter(!is.na(value)) %>%
+            rename(Child = variable, sumGain = value) %>%
+            arrange(-sumGain) %>%
+            head(input$top_gain_X) %>%
+            ggplot(aes(x = Child, y = Parent, fill = sumGain)) +
+            geom_tile() +
+            scale_fill_gradientn(colors = c("aliceblue", "lightblue", "blue")) +
+            theme_light() +
+            theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust = 0.9))
+        ) %>% layout(height = 1000, width = 1000)
+      })
+      
+      
+      output$SHAP_Interaction_matrix <-renderPlotly({
+        ggplotly(loaded_state$model_output$imp_plot$imp_shap_X %>% 
+                   head(input$top_shap_X) %>%
+                   ggplot(.,aes(x = ft , y = interaction , fill = value)) + 
+                   geom_tile() + 
+                   scale_fill_gradientn(colors =c( "aliceblue", "lightblue", "blue"))+
+                   theme_light()+
+                   theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust=0.9)) ) %>% 
+          layout( height = 1000,width = 1000 )
+        
+        
+      })
+      
+      
+      output$Interaction_gain <- renderPlot({
+        plot(loaded_state$model_output$imp_plot$EIXinteraction_gain, top = input$topfeatures, text_size = 6) + theme(
+          legend.text = element_text(size = 17),
+          legend.title = element_text(size = 17)
+        )
+      })
+      
+      output$Interaction_gain2 <- renderPlot({
+        plot(loaded_state$model_output$imp_plot$EIXinteraction_gain,
+             top = input$topfeatures,
+             xmeasure = input$x_axis,
+             ymeasure = input$y_axis,
+             radar = FALSE)
+      })
+      
+      output$tree_plot <- DiagrammeR::renderGrViz({
+        req(loaded_state$model_output)
+        model <- loaded_state$model_output$model
+        # tree_index <- input$tree_index
+        xgb.plot.tree(model = model, trees = input$tree_index)
+      })
+      
       output$action_message_training <- renderText("Training state has been loaded.")
     } else {
       output$action_message_training <- renderText("File not found.")
     }
   }
+  
+  
   
   observeEvent(input$save_Training, {
     save_Training()
@@ -581,6 +677,364 @@ server <- function(input, output, session) {
   observeEvent(input$load_tuning_result, {
     load_tuning_result()
   })
+  
+  ######### GLM  Overlays ########
+  drawn_shapes <- reactiveVal(list())
+  x_range <- reactiveVal(NULL)
+  y_range <- reactiveVal(NULL)
+  y2_range <- reactiveVal(NULL)
+  
+  base_pred <- eventReactive(input$Load_base_model, {
+    readRDS(glue("{input$Base_pred_path}.rds"))$model_output$pred
+  })
+  
+  overlays <- eventReactive({
+    input$Fit
+    input$Load_base_model
+    }, {
+    req(base_pred())
+    weight = model_spec[[input$model]]$exposure
+    response = model_spec[[input$model]]$response
+    fam = model_spec[[input$model]]$fam
+    splines_dt <- do.call(rbind, drawn_shapes())
+    glm_train <- train[train[[weight]] > 0] %>% select(unique(splines_dt$feature))
+    if (nrow(splines_dt) > 0 && !is.null(splines_dt)) {
+      glm_fit(glm_train, splines_dt, train[train[[weight]] > 0][[response]], base_pred(), train[train[[weight]] > 0][[weight]], fam)
+    } else {
+      return(NULL)
+    }
+  })
+  
+  fit_plot <- reactive({
+    req(base_pred())
+    weight = model_spec[[input$model]]$exposure
+    response = model_spec[[input$model]]$response
+    
+    challenger <- if (is.null(overlays())) {
+      base_pred()
+    } else {
+      base_pred() * overlays()$adj
+    }
+    plot_fit(
+      ft = train[train[[weight]] > 0][[input$ft]],
+      actual = train[train[[weight]] > 0][[response]] * train[train[[weight]] > 0][[weight]],
+      pred = base_pred(),
+      challenger = challenger,
+      weight = train[train[[weight]] > 0][[weight]],
+      rebase = TRUE,
+      point_size = input$size_pt,
+      lwd = input$size_line,
+      fit_lines = input$fit_lines,
+      ft_name= input$ft
+    )
+  })
+  
+  output$overlay_plot <- renderPlotly({
+    req(fit_plot())
+    p <- ggplotly(fit_plot()) %>% layout(
+      legend = list(
+        orientation = 'h',  
+        x = 0.5,           
+        xanchor = 'center', 
+        y = -0.2            
+      )
+    )
+    shapes <- drawn_shapes()[[input$ft]]
+    
+    if (!is.null(shapes)) {
+      p <- p %>%
+        add_segments(
+          data = shapes,
+          x = ~x0, xend = ~x1, y = ~y0, yend = ~y1,
+          line = list(color = "red"),
+          showlegend = FALSE
+        )
+    }
+    
+    p <- p %>%
+      layout(
+        dragmode = if (input$draw_mode) "drawline" else "pan",
+        newshape = list(line = list(color = "red")),
+        yaxis2 = list(overlaying = "y", side = "right", range = y2_range() %||% range(p$data$value))
+      ) %>%
+      event_register("plotly_relayout")
+    
+    isolate({
+      if (is.null(x_range())) x_range(range(p$data$ft))
+      if (is.null(y_range())) y_range(range(p$data$value))
+      if (is.null(y2_range())) y2_range(range(p$data$value))
+    })
+    
+    p
+  })
+  
+  observeEvent(event_data("plotly_relayout"), {
+    relayout_data <- event_data("plotly_relayout")
+    if (!is.null(relayout_data)) {
+      if (!is.null(relayout_data[["xaxis.range[0]"]])) x_range(c(relayout_data[["xaxis.range[0]"]], relayout_data[["xaxis.range[1]"]]))
+      if (!is.null(relayout_data[["yaxis.range[0]"]])) y_range(c(relayout_data[["yaxis.range[0]"]], relayout_data[["yaxis.range[1]"]]))
+      if (!is.null(relayout_data[["yaxis2.range[0]"]])) y2_range(c(relayout_data[["yaxis2.range[0]"]], relayout_data[["yaxis2.range[1]"]]))
+      
+      if (!is.null(relayout_data$shapes)) {
+        shapes <- relayout_data$shapes
+        if (is.data.frame(shapes) && nrow(shapes) > 0) {
+          new_shapes <- data.frame(x0 = numeric(0), y0 = numeric(0), x1 = numeric(0), y1 = numeric(0), id = character(), feature = character(), range = character())
+          for (i in seq_along(shapes$x0)) {
+            if (!(shapes$x0[i] == 0 && shapes$y0[i] == 0 && shapes$x1[i] == 1 && shapes$y1[i] == 1)) {
+              existing_shapes <- drawn_shapes()[[input$ft]]
+              overlap <- any(existing_shapes$x0 <= shapes$x1[i] & existing_shapes$x1 >= shapes$x0[i])
+              if (overlap) {
+                existing_shape <- existing_shapes[existing_shapes$x1 >= shapes$x0[i], ]
+                y_intercept <- existing_shape$y1
+                shapes$y0[i] = y_intercept
+                shapes$x0[i] = existing_shape$x1
+                new_shapes <- rbind(new_shapes, data.frame(x0 = existing_shape$x0, y0 = existing_shape$y0, x1 = existing_shape$x1, y1 = existing_shape$y1, id = glue("{input$ft}_{round(existing_shape$x0, 0)}to{round(existing_shape$x1, 0)}"), feature = input$ft, range = glue("{round(existing_shape$x0, 0)}to{round(existing_shape$x1, 0)}")))
+                existing_shapes <- existing_shapes[existing_shapes$x1 < shapes$x0[i] | existing_shapes$x0 > shapes$x1[i], ]
+              }
+              new_shapes <- rbind(new_shapes, data.frame(x0 = shapes$x0[i], y0 = shapes$y0[i], x1 = shapes$x1[i], y1 = shapes$y1[i], id = glue("{input$ft}_{round(shapes$x0[i], 0)}to{round(shapes$x1[i], 0)}"), feature = input$ft, range = glue("{round(shapes$x0[i], 0)}to{round(shapes$x1[i], 0)}")))
+            }
+          }
+          all_shapes <- drawn_shapes()
+          all_shapes[[input$ft]] <- rbind(existing_shapes, new_shapes)
+          drawn_shapes(all_shapes)
+          updateCheckboxGroupInput(session, "undo_shapes", choices = do.call(rbind, all_shapes)$id)
+        }
+      }
+    }
+  })
+  
+  observeEvent(input$undo, {
+    req(input$undo_shapes)
+    all_shapes <- drawn_shapes()
+    for (ft in names(all_shapes)) {
+      shapes <- all_shapes[[ft]]
+      shapes <- shapes[!shapes$id %in% input$undo_shapes, ]
+      all_shapes[[ft]] <- shapes
+    }
+    drawn_shapes(all_shapes)
+    updateCheckboxGroupInput(session, "undo_shapes", choices = do.call(rbind, all_shapes)$id)
+  })
+  
+  output$glm_fit <- renderTable({
+    all_shapes <- drawn_shapes()
+    if (is.null(overlays())) {
+      do.call(rbind, all_shapes)
+    } else {
+      do.call(rbind, all_shapes) %>% left_join(overlays()$fit, by = "id")
+    }
+  })
+  
+  output$glm_summary <- renderPrint({
+    req(overlays())
+    summary(overlays()$model)
+  })
+  
+  observeEvent(input$reset, {
+    drawn_shapes(list())
+    updateCheckboxGroupInput(session, "undo_shapes", choices = NULL)
+  })
+  
+  output$export <- downloadHandler(
+    filename = function() {
+      paste("drawn_shapes", Sys.Date(), ".csv", sep = "")
+    },
+    content = function(file) {
+      all_shapes <- drawn_shapes()
+      combined_shapes <- do.call(rbind, all_shapes)
+      write.csv(combined_shapes, file, row.names = FALSE)
+    }
+  )
+  
+  observeEvent(input$save_glm, {
+    saveRDS(list(drawn_shapes = drawn_shapes(), undo_shapes = input$undo_shapes), file = paste0(input$glm_overlay_out, ".rds"))
+  })
+  
+  observeEvent(input$load_glm, {
+    loaded_data <- readRDS(paste0(input$glm_overlay_out, ".rds"))
+    drawn_shapes(loaded_data$drawn_shapes)
+    updateCheckboxGroupInput(session, "undo_shapes", choices = do.call(rbind, loaded_data$drawn_shapes)$id, selected = loaded_data$undo_shapes)
+  })
+  
+  # AvE
+  
+  observe({
+    feature_choices <- c("none", "rnd_factor", fts)
+    # updateSelectInput(session, "model", choices = sort(names(model_spec)))
+    updateSelectInput(session, "ft", choices =  update_fts_list())
+    updateSelectInput(session, "factor_consistency", choices = feature_choices)
+    updateSelectInput(session, "filter_feature", choices = fts)
+    updateSelectInput(session, "secondary_filter_feature", choices = fts)
+    updateSelectInput(session, "tertiary_filter_feature", choices = fts)
+  })
+  
+  update_fts_list <- eventReactive(input$Load_base_model, {
+    gbm_fts <- readRDS(glue("{input$Base_pred_path}.rds"))$model_output$model$feature_name
+  
+    lapply(fts, function(x) 
+      if(x %in% gbm_fts){paste(x , "(xgb fitted)" , " ")
+    } else{x} )  %>% unlist() -> lab
+    gbm_fts <-lapply(fts, function(x) x) %>% setNames(.,lab) 
+    return(gbm_fts)
+  
+  })
+  
+  
+  sampling <- reactive( {
+    set.seed(1)
+    weight <- tolower(model_spec[[input$model]]$exposure)
+    response <- tolower(model_spec[[input$model]]$response)
+    
+    
+    challenger <- if (is.null(overlays())) {
+      base_pred()
+    } else {
+      base_pred() * overlays()$adj
+    }
+    df_sample = train[train[[weight]] > 0 ] %>% 
+      select(fts,c(weight, response )) %>%
+      mutate(pred =  challenger,
+             none  = "NA") %>% sample_frac(input$samplesize) 
+    
+    return(
+      list(df_sample=df_sample))
+  })
+  
+  
+  observeEvent( {
+    input$filter_feature 
+    input$Load_base_model },{
+    # req( sampling()$df_sample)
+    req(input$filter_feature)
+    feature_data <- sampling()$df_sample[[input$filter_feature]]
+    if (is.numeric(feature_data)) {
+      output$filter_ui <- renderUI({
+        sliderInput("feature_range", "Feature Range:", min = min(feature_data, na.rm = TRUE), max = max(feature_data, na.rm = TRUE), value = range(feature_data, na.rm = TRUE))
+      })
+    } else {
+      output$filter_ui <- renderUI({
+        checkboxGroupInput("feature_categories", "Select Categories:", choices = KT_dym_sort(unique(feature_data)), selected = KT_dym_sort(unique(feature_data)))
+      })
+    }
+  })
+  
+  observeEvent({
+    input$secondary_filter_feature
+    input$Load_base_model }, {
+    req(input$secondary_filter_feature)
+    feature_data <- sampling()$df_sample[[input$secondary_filter_feature]]
+    
+    if (is.numeric(feature_data)) {
+      output$secondary_filter_ui <- renderUI({
+        sliderInput("secondary_feature_range", "Secondary Feature Range:", min = min(feature_data, na.rm = TRUE), max = max(feature_data, na.rm = TRUE), value = range(feature_data, na.rm = TRUE))
+      })
+    } else {
+      output$secondary_filter_ui <- renderUI({
+        checkboxGroupInput("secondary_feature_categories", "Select Secondary Categories:", choices = KT_dym_sort(unique(feature_data)), selected = KT_dym_sort(unique(feature_data)))
+      })
+    }
+  })
+  
+  observeEvent({
+    input$tertiary_filter_feature 
+    input$Load_base_model }, {
+    req(input$tertiary_filter_feature)
+    feature_data <- sampling()$df_sample[[input$tertiary_filter_feature]]
+    
+    if (is.numeric(feature_data)) {
+      output$tertiary_filter_ui <- renderUI({
+        sliderInput("tertiary_feature_range", "Tertiary Feature Range:", min = min(feature_data, na.rm = TRUE), max = max(feature_data, na.rm = TRUE), value = range(feature_data, na.rm = TRUE))
+      })
+    } else {
+      output$tertiary_filter_ui <- renderUI({
+        checkboxGroupInput("tertiary_feature_categories", "Select Tertiary Categories:", choices = KT_dym_sort(unique(feature_data)), selected = KT_dym_sort(unique(feature_data)))
+      })
+    }
+  })
+  
+  
+
+  
+  
+  
+  results <- reactive( {
+    # req(input$ft, input$filter_feature, input$secondary_filter_feature, input$tertiary_filter_feature, input$model)
+    df_sample <- sampling()$df_sample
+    rnd_factor <- rep(1:4, as.integer(nrow(df_sample) / 4) + 1)
+    df_sample$rnd_factor <- head(rnd_factor, nrow(df_sample))
+    
+    ft_data <- df_sample[[input$ft]]
+    factor_consistency_data <- df_sample[[input$factor_consistency]]
+    if (is.numeric(df_sample[[input$filter_feature]])) {
+      filtered_data <- df_sample[df_sample[[input$filter_feature]] >= input$feature_range[1] & df_sample[[input$filter_feature]] <= input$feature_range[2], ]
+    } else {
+      filtered_data <- df_sample[df_sample[[input$filter_feature]] %in% input$feature_categories, ]
+    }
+    
+    if (is.numeric(df_sample[[input$secondary_filter_feature]])) {
+      filtered_data <- filtered_data[filtered_data[[input$secondary_filter_feature]] >= input$secondary_feature_range[1] & filtered_data[[input$secondary_filter_feature]] <= input$secondary_feature_range[2], ]
+    } else {
+      filtered_data <- filtered_data[filtered_data[[input$secondary_filter_feature]] %in% input$secondary_feature_categories, ]
+    }
+    
+    if (is.numeric(df_sample[[input$tertiary_filter_feature]])) {
+      filtered_data <- filtered_data[filtered_data[[input$tertiary_filter_feature]] >= input$tertiary_feature_range[1] & filtered_data[[input$tertiary_filter_feature]] <= input$tertiary_feature_range[2], ]
+    } else {
+      filtered_data <- filtered_data[filtered_data[[input$tertiary_filter_feature]] %in% input$tertiary_feature_categories, ]
+    }
+    print(glue("test {input$feature_categories}"))
+    print(c(input$filter_feature , input$secondary_filter_feature ,input$tertiary_filter_feature ))
+  
+    weight <- tolower(model_spec[[input$model]]$exposure)
+    response <- tolower(model_spec[[input$model]]$response)
+    filtered_data$actual <- filtered_data[[response]] * filtered_data[[weight]]
+    filtered_data$weight <- filtered_data[[weight]]
+
+    suppressWarnings(calc_ave(ft = filtered_data[[input$ft]], 
+                              actual = filtered_data$actual, 
+                              pred = filtered_data$pred, 
+                              weight = filtered_data$weight, 
+                              factor_consistency = filtered_data[[input$factor_consistency]], 
+                              rebase = input$rebase,
+                              ft_name= input$ft))
+  })
+  
+  cosmetic <- reactive({
+    cosmetic_changes(p = results()$ave_plot,
+                     alpha_pt = input$alpha_pt,
+                     alpha_line = input$alpha_line,
+                     size_pt = input$size_pt,
+                     size_line = input$size_line,
+                     fit_loess = input$fitloess,
+                     smooth_strength = input$smooth_strength,
+                     control_yaxis = input$y_lim, 
+                     upper_lim =  input$y_interval[2],
+                     lower_lim = input$y_interval[1])
+  })
+  
+  
+  output$avePlot <- renderPlotly({
+    plot <- cosmetic()$ave_plot
+    if (is.null(plot)) {
+      return(NULL)}
+    plot
+  })
+  
+  # output$Sample_submitted <- renderText({  sample_flag <- sampling()$flag 
+  # if (is.null(sample_flag)){
+  #   return(NULL)
+  # }
+  # sample_flag })
+  
+  output$downloadData <- downloadHandler(
+    filename = function() {
+      paste("ave_data-", Sys.Date(), ".xlsx", sep = "")
+    },
+    content = function(file) {
+      writexl::write_xlsx(list(ave_data = results()$ave_df , smoothed_data  = cosmetic()$smooth_data) , file)
+    }
+  )
+  
+  
 }
 
 shinyApp(ui = ui, server = server)
