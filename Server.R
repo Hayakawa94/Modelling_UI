@@ -78,13 +78,21 @@ source("H:/Restricted Share/DA P&U/Tech Modelling/Users/Khoa/RPMtools/RPMtools.R
 # train<-df
 # fts<- num_fts
 # train <- fread("C:\\Users\\Khoa.Truong\\Work\\P2_ui_DATA\\train.csv")
-# set.seed(1)
-# train %>% sample_frac(0.2) -> train
 # train$none = "NA"
 # fts <- train %>% select(starts_with("num") )%>% names %>% sort
-source("H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelling_ui/UI.R")
+# 
+# nrow(train)
+# set.seed(1)
+# train$idx = 1:nrow(train)
+# train %>% sample_frac(0.2) -> test
+# train[setdiff(train$idx , test$idx)] %>% select(-idx) -> train
+# test<- test %>% select(-idx)
+# nrow(train) + nrow(test)
 
 source("H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelling_ui/Reactive_calc.R")
+source("H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelling_ui/UI.R")
+
+
 
 server <- function(input, output, session) {
   initial_data <- data.frame(
@@ -166,6 +174,8 @@ server <- function(input, output, session) {
       hot_col("Interaction_Constraints", type = "checkbox")
   })
   
+  
+  
   # Observer to reset the table data
   observeEvent(input$reset_table, {
     table_data(initial_data)
@@ -175,11 +185,106 @@ server <- function(input, output, session) {
   
 
   observeEvent(input$select_all, {
-    table_data(initial_data %>% mutate(Use_Feature = rep(T, length(fts))))
+    
+    table_data(hot_to_r(input$ft_table) %>% mutate(Use_Feature = rep(T, nrow(hot_to_r(input$ft_table)))))
+    session
     
   })
   
   
+  correlation <-reactive({
+    req(EDA_result())
+    weight = model_spec[[input$model]]$exposure
+    fts <-  hot_to_r(input$ft_table) %>% filter(Use_Feature==T)  %>% select(Features) %>% pull
+    KT_plot_top_n_correlation(train[train[[weight]] >0 ] %>% select(fts) ,n = input$top_corr)
+  })
+  
+  output$corr_topn_slider <- renderUI({
+    n_fts <-  hot_to_r(input$ft_table) %>% filter(Use_Feature==T)  %>% select(Features) %>% pull %>% length()
+    sliderInput("top_corr", "Number of Top Correlations:", 
+                min = 1, max = n_fts, value = 5 , step = 1)
+  })
+  output$corr_plot <-  renderPlotly({
+    correlation()
+  })
+  
+  ######### Boruta
+  load_boruta_result<- reactiveVal()
+  Boruta_result <- eventReactive(input$Boruta_run  , {
+    model = input$model
+    weight = model_spec[[model]]$exposure
+    response = model_spec[[model]]$response
+    fts <-  hot_to_r(input$ft_table) %>% filter(Use_Feature==T)  %>% select(Features) %>% pull
+    
+    Bresult <- KT_Boruta(train = train[train[[weight]] >0] %>% select(fts),
+              train_y = train[train[[weight]] >0][[response]],
+              weight = train[train[[weight]] >0][[weight]],
+              max_Runs = input$Boruta_max_run,
+              eval_metric = model_spec[[model]]$eval_metric,
+              objective = model_spec[[model]]$objective,
+              nrounds = input$Boruta_nrounds,
+              max.depth = input$Boruta_max_depth,
+              eta =  input$Boruta_eta,
+              early_stopping_rounds = 5
+              )
+    show("Update_ft_spec") 
+    return(Bresult)
+  })
+  
+  
+  output$Boruta_imp <- renderPlot({
+    Boruta_result()$Boruta_p
+  })
+  output$Boruta_shap_imp <- renderPlot({
+    Boruta_result()$SHAP_imp_plot
+  })
+  
+  observeEvent(input$Update_ft_spec, {
+    if(is.null(load_boruta_result())){
+      boruta_selected_fts <-Boruta_result()$selected_fts
+    }else{
+      boruta_selected_fts <-load_boruta_result()$selected_fts
+    }
+    hot_to_r(input$ft_table) %>% 
+      left_join(data.table(Features=boruta_selected_fts , use = T) , by = "Features") %>%
+      mutate(Use_Feature =use) %>% select(-use) -> boruta_ft_spec
+    
+    table_data(boruta_ft_spec)
+    session
+  })
+  
+  
+  observe({
+    
+    req(Boruta_result())
+    print("Print saving Boruta_result")
+    saveRDS(list(result =  Boruta_result(),
+                 Boruta_max_run=input$Boruta_max_run,
+                 Boruta_eta = input$Boruta_eta,
+                 Boruta_max_depth = input$Boruta_max_depth,
+                 Boruta_nrounds=input$Boruta_nrounds), 
+                 glue("{input$file_name_boruta}.rds"))
+    print("finished saving Boruta_result")
+  })
+  
+    
+    observeEvent(input$load_boruta,{
+    # req(Boruta_result())
+    Boruta_result <- readRDS(glue("{input$file_name_boruta}.rds"))
+    updateSliderInput(session, "Boruta_max_run",value = Boruta_result$Boruta_max_run)
+    updateSliderInput(session, "Boruta_eta",value =Boruta_result$Boruta_eta)
+    updateSliderInput(session, "Boruta_max_depth",value =Boruta_result$Boruta_max_depth)
+    updateSliderInput(session, "Boruta_nrounds",value =Boruta_result$Boruta_nrounds)
+    load_boruta_result(Boruta_result$result)
+    output$Boruta_imp <- renderPlot({
+      Boruta_result$result$Boruta_p
+    })
+    output$Boruta_shap_imp <- renderPlot({
+      Boruta_result$result$SHAP_imp_plot
+    })
+    show("Update_ft_spec") 
+   
+  })
   
   
   tune_result <- eventReactive(input$tune, {
@@ -190,7 +295,11 @@ server <- function(input, output, session) {
       kfold = 0
     }
     req(input$ft_table)
-    ft_spec_table <- hot_to_r(input$ft_table)%>% filter(Use_Feature==T) 
+    ft_spec_table <- hot_to_r(input$ft_table) %>% filter(Use_Feature==T) 
+    if(nrow(ft_spec_table) ==0){
+      print("No features were selected")
+    }
+    req(nrow(ft_spec_table)>0)
     fts_to_tune <- ft_spec_table$Features
     ft_spec_table  %>% select(Monotonicity) %>% pull -> monotone_constraints
     init_X = seq(1,length(fts_to_tune))
@@ -231,8 +340,13 @@ server <- function(input, output, session) {
     }else{
       early_stopping_rounds = NULL
     }
+    
     req(input$ft_table)
     ft_spec_table <- hot_to_r(input$ft_table)%>% filter(Use_Feature==T) 
+    if(nrow(ft_spec_table) ==0){
+      print("No features were selected")
+    }
+    req(nrow(ft_spec_table)>0)
     fts_to_train <- ft_spec_table$Features
     ft_spec_table  %>% select(Monotonicity) %>% pull -> monotone_constraints
     init_X = seq(1,length(fts_to_train))
@@ -253,7 +367,7 @@ server <- function(input, output, session) {
                lambda = input$train_lambda,
                alpha = input$train_alpha,
                nrounds = input$train_nrounds,
-               parallel = input$Distribute_Computation,
+               parallel = T,
                gamma=input$gamma,
                interaction_constraints = interaction_constraints,
                monotone_constraints = monotone_constraints,
@@ -266,8 +380,8 @@ server <- function(input, output, session) {
   
   observeEvent(input$load_trained_model, {
     
-    if (file.exists(glue("{input$file_name_SHAP}.rds"))){
-      readRDS(glue("{input$file_name_SHAP}.rds"))$model_output -> model_output
+    if (file.exists(glue("{input$file_name_Training}.rds"))){
+      readRDS(glue("{input$file_name_Training}.rds"))$model_output -> model_output
       shap_values(model_output$shap_values)
       
       ft_imp <- model_output$imp_plot$imp_shap$data$variable
@@ -366,6 +480,11 @@ server <- function(input, output, session) {
   output$alpha_plot <- renderPlotly({
     tune_result()$hyperparameters_trends$alpha
   })
+  
+  output$gamma_plot <- renderPlotly({
+    tune_result()$hyperparameters_trends$gamma
+  })
+  
   output$opt_result_plot <- DT::renderDataTable({
     tune_result()$opt_results %>% mutate_all(~ round(., 3))
   })
@@ -384,6 +503,14 @@ server <- function(input, output, session) {
   
   output$SHAP_imp_plot <-renderPlotly({
      ggplotly( train_result()$imp_plot$imp_shap)%>% layout( height = 1000 )
+  })
+  
+  
+  output$imp_comparison <- renderPlot({
+    KT_plot_compare_ft_imp(train_result()$model_output$imp_plot$imp_gain$data$Feature,
+                           train_result()$model_output$imp_plot$imp_shap$data$variable) +
+      theme(legend.position = "none") +
+      theme_light(base_size = 18) + ggtitle("gain vs SHAP importance") 
   })
 
   
@@ -491,13 +618,62 @@ server <- function(input, output, session) {
   load_tuning <- function() {
     file_name <- paste0(input$file_name_tuning, ".rds")
     if (file.exists(file_name)) {
-      loaded_state <- readRDS(file_name)
-      for (name in names(loaded_state$inputs)) {
-        if (name %in% names(input)) {
-          updateSliderInput(session, name, value = loaded_state$inputs[[name]])
-        }
-      }
+      tune_result <- readRDS(file_name)
+      loaded_state <- tune_result$input
+      updateSliderInput(session, "eta", value = loaded_state$eta)
+      updateSliderInput(session, "min_child_weight", value = loaded_state$min_child_weight)
+      updateSliderInput(session, "max_depth", value = loaded_state$max_depth)
+      updateSliderInput(session, "alpha", value = loaded_state$alpha)
+      updateSliderInput(session, "lambda", value = loaded_state$lambda)
+      updateSliderInput(session, "colsample_bytree", value = loaded_state$colsample_bytree)
+      updateSliderInput(session, "subsample", value = loaded_state$subsample)
+      updateSliderInput(session, "nrounds", value = loaded_state$nrounds)
+      updateSliderInput(session, "gamma", value = loaded_state$gamma)
+      
+      hp_plots <- tune_result$optz_result$hyperparameters_trends
+      
+      
+      output$tune_iteration_plot <- renderPlotly({
+        hp_plots$tune_iteration
+      })
+      
+      output$eta_plot <- renderPlotly({
+        hp_plots$eta
+      })
+      
+      output$max_depth_plot <- renderPlotly({
+        hp_plots$max_depth
+      })
+      
+      output$min_child_weight_plot <- renderPlotly({
+        hp_plots$min_child_weight
+      })
+      
+      output$colsample_bytree_plot <- renderPlotly({
+        hp_plots$colsample_bytree
+      })
+      
+      output$subsample_plot <- renderPlotly({
+        hp_plots$subsample
+      })
+      
+      output$lambda_plot <- renderPlotly({
+        hp_plots$lambda
+      })      
+      output$alpha_plot <- renderPlotly({
+        hp_plots$alpha
+      })
+      
+      output$gamma_plot <- renderPlotly({
+        hp_plots$gamma
+      })
+      
+      output$opt_result_plot <- DT::renderDataTable({
+        tune_result$optz_result$opt_results %>% mutate_all(~ round(., 3))
+      })
       output$action_message_tuning <- renderText("Tuning state has been loaded.")
+      
+      
     } else {
       output$action_message_tuning <- renderText("File not found.")
     }
@@ -507,12 +683,10 @@ server <- function(input, output, session) {
   load_tuning_result <- function() {
     file_name <- paste0(input$file_name_tuned, ".rds")
     if (file.exists(file_name)) {
-      loaded_state <- readRDS(file_name)$optz_result$best_params
-      # for (name in names(loaded_state)) {
-      #   if (name %in% names(input)) {
-      #     updateSliderInput(session, name, value = loaded_state[[name]])
-      #   }
-      # }
+      tune_result<- readRDS(file_name)
+      
+      loaded_state <- tune_result$optz_result$best_params
+
       updateSliderInput(session, "train_eta", value = loaded_state$eta)
       updateSliderInput(session, "train_min_child_weight", value = loaded_state$min_child_weight)
       updateSliderInput(session, "train_max_depth", value = loaded_state$max_depth)
@@ -523,6 +697,8 @@ server <- function(input, output, session) {
       updateSliderInput(session, "train_nrounds", value = loaded_state$nrounds)
       updateSliderInput(session, "train_gamma", value = loaded_state$gamma)
       output$action_message_tuning <- renderText("Tuning state has been loaded.")
+      
+      
     } else {
       output$action_message_tuning <- renderText("File not found.")
     }
@@ -542,7 +718,8 @@ server <- function(input, output, session) {
       train_Ratio = input$train_Ratio,
       train_kfold_val = input$train_kfold_val,
       train_use_early_stopping_rounds = input$use_early_stopping_rounds,
-      model_output = train_result()
+      model_output = train_result(),
+      ft_spec = hot_to_r(input$ft_table)
     ), file_name)
     
     output$action_message_training <- renderText("Training state has been saved.")
@@ -566,6 +743,7 @@ server <- function(input, output, session) {
       updateSliderInput(session, "train_gamma", value = loaded_state$train_gamma)
       updateSliderInput(session, "use_early_stopping_rounds", value = loaded_state$train_use_early_stopping_rounds)
       updateSliderInput(session, "tree_index", max = loaded_state$model_output$model$niter -1)
+      table_data(loaded_state$ft_spec)
       # Trigger the rendering of plots
       output$Gain_imp_plot <- renderPlotly({
         ggplotly(loaded_state$model_output$imp_plot$imp_gain + theme_light()) %>% layout(height = 1000)
@@ -643,6 +821,14 @@ server <- function(input, output, session) {
         xgb.plot.tree(model = model, trees = input$tree_index)
       })
       
+      
+      output$imp_comparison <- renderPlot({
+        KT_plot_compare_ft_imp(loaded_state$model_output$imp_plot$imp_gain$data$Feature,
+                               loaded_state$model_output$imp_plot$imp_shap$data$variable) +
+          theme(legend.position = "none")+
+          theme_light(base_size = 18) + ggtitle("gain vs SHAP importance") 
+      })
+      
       output$action_message_training <- renderText("Training state has been loaded.")
     } else {
       output$action_message_training <- renderText("File not found.")
@@ -651,8 +837,12 @@ server <- function(input, output, session) {
   
   
   
-  observeEvent(input$save_Training, {
+  observeEvent(train_result() ,{
+    
+    req(train_result())
+    print("Saving trained result")
     save_Training()
+    print("finished saving trained result")
   })
   
   observeEvent(input$load_Training, {
@@ -667,8 +857,12 @@ server <- function(input, output, session) {
     load_feature_spec()
   })
   
-  observeEvent(input$save_tuning, {
+  observeEvent(tune_result(), {
+  
+    req(tune_result())
+    print("Saving tuned result")
     save_tuning()
+    print("finished saving tuned result")
   })
   
   observeEvent(input$load_tuning, {
@@ -684,13 +878,15 @@ server <- function(input, output, session) {
   y_range <- reactiveVal(NULL)
   y2_range <- reactiveVal(NULL)
   
-  base_pred <- eventReactive(input$Load_base_model, {
-    readRDS(glue("{input$Base_pred_path}.rds"))$model_output$pred
+  base_pred <- reactive( {
+    req(file.exists(glue("{input$file_name_Training}.rds")))
+    readRDS(glue("{input$file_name_Training}.rds"))$model_output$pred
   })
   
   overlays <- eventReactive({
     input$Fit
     input$Load_base_model
+    base_pred()
     }, {
     req(base_pred())
     weight = model_spec[[input$model]]$exposure
@@ -818,9 +1014,9 @@ server <- function(input, output, session) {
   output$glm_fit <- renderTable({
     all_shapes <- drawn_shapes()
     if (is.null(overlays())) {
-      do.call(rbind, all_shapes)
+      do.call(rbind, all_shapes)%>% select(-x0,-x1 , -y0, -y1)
     } else {
-      do.call(rbind, all_shapes) %>% left_join(overlays()$fit, by = "id")
+      do.call(rbind, all_shapes) %>% left_join(overlays()$fit, by = "id") %>% select(-x0,-x1 , -y0, -y1)
     }
   })
   
@@ -846,7 +1042,8 @@ server <- function(input, output, session) {
   )
   
   observeEvent(input$save_glm, {
-    saveRDS(list(drawn_shapes = drawn_shapes(), undo_shapes = input$undo_shapes), file = paste0(input$glm_overlay_out, ".rds"))
+    req(drawn_shapes(),overlays(), base_pred())
+    saveRDS(list(drawn_shapes = drawn_shapes(), undo_shapes = input$undo_shapes, pred =  base_pred() * overlays()$adj), file = paste0(input$glm_overlay_out, ".rds"))
   })
   
   observeEvent(input$load_glm, {
@@ -856,7 +1053,9 @@ server <- function(input, output, session) {
   })
   
   # AvE
-  
+  observeEvent(input$Load_base_model , {
+    show("factor_consistency") 
+  })
   observe({
     feature_choices <- c("none", "rnd_factor", fts)
     # updateSelectInput(session, "model", choices = sort(names(model_spec)))
@@ -867,8 +1066,8 @@ server <- function(input, output, session) {
     updateSelectInput(session, "tertiary_filter_feature", choices = fts)
   })
   
-  update_fts_list <- eventReactive(input$Load_base_model, {
-    gbm_fts <- readRDS(glue("{input$Base_pred_path}.rds"))$model_output$model$feature_name
+  update_fts_list <- eventReactive(base_pred(), {
+    gbm_fts <- readRDS(glue("{input$file_name_Training}.rds"))$model_output$model$feature_name
   
     lapply(fts, function(x) 
       if(x %in% gbm_fts){paste(x , "(xgb fitted)" , " ")
@@ -1034,8 +1233,320 @@ server <- function(input, output, session) {
     }
   )
   
+  # ## Performance
+
+
+  Performance <- eventReactive( input$performance, {
+   
   
+      # req(input$use_early_stopping_rounds)
+      gc()
+      if (input$train_kfold == T    ){
+        kfold = input$train_kfold_val
+      }else{
+        kfold = 0
+      }
+      if(input$use_early_stopping_rounds== T){
+        early_stopping_rounds = 5
+      }else{
+        early_stopping_rounds = NULL
+      }
+      
+      req(input$ft_table)
+      ft_spec_table <- hot_to_r(input$ft_table)%>% filter(Use_Feature==T) 
+      if(nrow(ft_spec_table) ==0){
+        print("No features were selected")
+      }
+      req(nrow(ft_spec_table)>0)
+      fts_to_train <- ft_spec_table$Features
+      ft_spec_table  %>% select(Monotonicity) %>% pull -> monotone_constraints
+      init_X = seq(1,length(fts_to_train))
+      interaction_constraints <-  lapply(which(ft_spec_table$Interaction_Constraints==T),function(x) c(x)) 
+      append( list(setdiff(init_X, unlist(interaction_constraints))) ,interaction_constraints ) ->interaction_constraints
+      print(interaction_constraints)
+      train_model(fts = fts_to_train,
+                  model = input$model,
+                  train = train,
+                  kfold = kfold,
+                  train_validate_ratio = input$train_Ratio,
+                  # use_tunred_HP = NULL,
+                  eta = input$train_eta,
+                  max_depth = input$train_max_depth,
+                  min_child_weight = input$train_min_child_weight,
+                  subsample = input$train_subsample,
+                  colsample_bytree = input$train_colsample_bytree,
+                  lambda = input$train_lambda,
+                  alpha = input$train_alpha,
+                  nrounds = input$train_nrounds,
+                  parallel = T,
+                  gamma=input$gamma,
+                  interaction_constraints = interaction_constraints,
+                  monotone_constraints = monotone_constraints,
+                  early_stopping_rounds=early_stopping_rounds,
+                  return_pred_only = T,
+                  seed = 123
+      ) -> gbm_train_pred_w_diff_seed 
+    
+    
+    
+    train_result <- readRDS(glue("{input$file_name_Training}.rds"))
+    weight = model_spec[[input$model]]$exposure
+    response = model_spec[[input$model]]$response
+    
+    gbm_model <-  train_result$model_output$model
+    
+    
+    
+    gbm_train_pred <- train_result$model_output$pred 
+    
+    pred_diff <- gbm_train_pred_w_diff_seed/gbm_train_pred
+    ggplot(data.table(diff=pred_diff),aes(x = diff ))+geom_histogram(bins=100)+ theme_light(base_size = 18) -> stability_hist
+    
+    lapply(seq(0.01,0.5,0.01), function(x) ifelse(abs(pred_diff -1 ) < x ,1,0  )) %>% 
+      setNames(., as.character(seq(0.01,0.5,0.01))) %>% as.data.table() %>% summarise_all( list(mean)) %>% 
+      melt -> stability_test  
+    stability_test %>% rename(threshold = variable) %>% ggplot(.,aes(x = threshold, y= value , group = 1)) + geom_line() + geom_point() +
+       theme_light(base_size = 18)+
+      theme(axis.text.x = element_text(angle = 40, vjust = 1, hjust=0.9)) + ylab("Proportion of trained predictions matched") -> stability_threshold
+    
+    
+    
+    gbm_test_pred <- predict(gbm_model, 
+                             newdata = as.matrix(test[test[[weight]]>0] %>% select(gbm_model$feature_name)) ,
+                             type = "response")
+    
+    
+    
+    
+    
+    if (is.null(overlays())) {
+      train_overlays_adj <- 1
+      test_overlays_adj <- 1
+    }else{
+      train_overlays_adj <- overlays()$adj
+      
+      splines_dt <- do.call(rbind, drawn_shapes())
+      print(splines_dt)
+      overlay_fts_dt <- create_splines(df = test[test[[weight]]>0] %>% select(splines_dt$feature), splines_dt = splines_dt)
+      
+      test_overlays_adj <- predict(overlays()$model,newdata = model.matrix(~ . ,  data =overlay_fts_dt )  , type = "response" )
+    }
+    
+    train_pred <- gbm_train_pred*train_overlays_adj
+    test_pred <- gbm_test_pred*test_overlays_adj
+   
+    
+
+
+   KT_resample_gini(n = input$n_resample,
+                      actual = train[train[[weight]] > 0][[response]] * train[train[[weight]] > 0][[weight]] ,
+                      weight =  train[train[[weight]] > 0][[weight]] ,
+                  predicted = train_pred,
+                    normalize = T
+                       ) -> gini_train
+
+   # gini <- gini + scale_fill_manual('variable', values = c('xgb', 'xgb+adj')) + theme_light(base_size = 18)
+   
+   
+   KT_plot_lift(n =input$n_resample ,pred = train_pred ,                       
+                actual = train[train[[weight]] > 0][[response]] * train[train[[weight]] > 0][[weight]] ,
+                weight =  train[train[[weight]] > 0][[weight]] , 
+                nbin = input$lift_plot_bin,
+                title = "lift plot train"   ) $plot$lift_plot +theme_light(base_size = 18)  -> lift_train
+   
+   
+   KT_resample_gini(n = input$n_resample,
+                    actual = test[test[[weight]] > 0][[response]] * test[test[[weight]] > 0][[weight]] ,
+                    weight =  test[test[[weight]] > 0][[weight]] ,
+                    predicted = test_pred,
+                    normalize = T) -> gini_test
+   # gini <- gini + scale_fill_manual('variable', values = c('xgb', 'xgb+adj')) + theme_light(base_size = 18)
+   
+   
+   KT_plot_lift(n =input$n_resample ,pred = test_pred ,                       
+                actual = test[test[[weight]] > 0][[response]] * test[test[[weight]] > 0][[weight]] ,
+                weight =  test[test[[weight]] > 0][[weight]] , 
+                nbin = input$lift_plot_bin,
+                title = "lift plot test"   )$plot$lift_plot +theme_light(base_size = 18)   -> lift_test
+   
+   
+   # print(data.table(gini_train=gini_train , gini_test = gini_test) )
+   
+   data.table(gini_train=gini_train , gini_test = gini_test) %>%
+     melt() %>% ggplot(.,aes( x = value, group = variable , fill = variable))+ geom_density(alpha = 0.5) +  theme_light(base_size = 18)->gini
+   
+   validation_input<- list(test_pred =test_pred,
+                           stability_test=stability_test,
+                           test_weight = test[test[[weight]] > 0][[weight]] ,
+                           test_response = test[test[[weight]] > 0][[response]]
+                           )
+   
+   saveRDS(validation_input , glue("{input$file_name_Training}_validation_input.rds"))
+
+   return(list(gini = gini,
+               lift_train =ggplotly(lift_train),
+               lift_test =ggplotly(lift_test),
+               stability_hist=stability_hist,
+               stability_threshold=stability_threshold))
+  })
+  
+  output$gini <- renderPlot({
+    Performance()$gini
+  })
+
+  
+  output$lift_train <- renderPlotly({
+    Performance()$lift_train
+  })
+  output$lift_test <- renderPlotly({
+    Performance()$lift_test
+  })
+  
+  output$stability1 <- renderPlot({
+    Performance()$stability_hist
+                      
+  })
+  output$stability2 <- renderPlotly({
+    ggplotly(Performance()$stability_threshold)
+    
+  })
+  
+  # Model comparison
+
+  
+  load_model_file <- eventReactive(input$Run_comparison, {
+    tryCatch({
+      list(
+        base = list(
+          validation = readRDS(glue("{input$base_file}_validation_input.rds")),
+          train_result = readRDS(glue("{input$base_file}.rds"))
+        ),
+        challenger = list(
+          validation = readRDS(glue("{input$challenger_file}_validation_input.rds")),
+          train_result = readRDS(glue("{input$challenger_file}.rds"))
+        )
+      )
+    }, error = function(e) {
+      showNotification("Error loading files. Please check the file names and try again.", type = "error")
+      NULL
+    })
+    
+    
+  })
+  
+  observe({
+    req(load_model_file())
+
+    same_fts <- intersect(load_model_file()$base$train_result$model_output$model$feature_names, 
+                          load_model_file()$challenger$train_result$model_output$model$feature_names)
+    updateSelectInput(session, "SHAP_common_ft", choices = same_fts)
+    
+
+  })
+  
+  observe({
+    req(input$SHAP_common_ft)
+    
+    # Generate SHAP comparison plot
+    SHAP_comp_plot <- KT_plot_compare_shap(sv_base = load_model_file()$base$train_result$model_output$shap_values$main_effect$shap_main_effect[[input$SHAP_common_ft]],
+                                           sv_challenger = load_model_file()$challenger$train_result$model_output$shap_values$main_effect$shap_main_effect[[input$SHAP_common_ft]],
+                                           base_ft = load_model_file()$base$train_result$model_output$shap_values$main_effect$pred_data_main_effect[, input$SHAP_common_ft],
+                                           challenger_ft = load_model_file()$challenger$train_result$model_output$shap_values$main_effect$pred_data_main_effect[, input$SHAP_common_ft],
+                                           ft_name = input$SHAP_common_ft,
+                                           loess_strength = input$SHAP_comp_smooth_strength)
+    
+    output$shap_model_comparison <- renderPlot({
+      if (is.null(SHAP_comp_plot)) {
+        showNotification("Plot generation failed. Please check the inputs and try again.", type = "error")
+      } else {
+        SHAP_comp_plot
+      }
+    })
+    
+
+    
+    
+  })
+  
+  
+  observe({
+    req(load_model_file())
+    base_hp <- load_model_file()$base$train_result[c("train_eta" , "train_min_child_weight" , "train_max_depth" , "train_alpha" , 
+                                                     "train_lambda", "train_colsample_bytree" ,"train_subsample", "train_nrounds")] %>% 
+      as.data.table() %>% melt %>% mutate(scenario = "base")
+    challenger_hp <- load_model_file()$challenger$train_result[c("train_eta" , "train_min_child_weight" , "train_max_depth" , "train_alpha" , 
+                                                                 "train_lambda", "train_colsample_bytree" ,"train_subsample", "train_nrounds")] %>% 
+      as.data.table()%>% melt %>% mutate(scenario = "challenger")
+    rbind(base_hp , challenger_hp) %>% pivot_wider(names_from = "scenario" , values_from = "value") %>% 
+      mutate(diff = challenger/base) -> compare_hp
+    
+    
+    output$compare_hp <- renderDataTable({
+      compare_hp
+    })
+    
+    KT_plot_compare_ft_imp(load_model_file()$base$train_result$model_output$imp_plot$imp_gain$data$Feature,
+                           load_model_file()$challenger$train_result$model_output$imp_plot$imp_gain$data$Feature)-> compare_gain_imp
+    KT_plot_compare_ft_imp(load_model_file()$base$train_result$model_output$imp_plot$imp_shap$data$variable,
+                           load_model_file()$challenger$train_result$model_output$imp_plot$imp_shap$data$variable)-> compare_shap_imp
+    
+    
+    output$SHAP_imp_comparison <- renderPlot({
+      compare_shap_imp
+    })
+    output$gain_imp_comparison <- renderPlot({
+      compare_gain_imp
+    })
+    
+    rbind(load_model_file()$base$validation$stability_test %>% mutate(scenario= "base"),
+          load_model_file()$challenger$validation$stability_test %>% mutate(scenario= "challenger")) %>%
+      ggplot(.,aes(x = variable , y = value , group = scenario , color = scenario)) + geom_line() + geom_point() -> compare_stability
+    
+    output$stability_comparison  <- renderPlot({
+      compare_stability
+    })
+    
+
+    
+
+  })
+  
+  observe({
+    req(load_model_file())
+    KT_plot_dl(n =input$dl_resample_size,
+               actual = load_model_file()$base$validation$test_weight*base$validation$test_response,
+               weight =load_model_file()$base$validation$test_weight,
+               base = load_model_file()$base$validation$test_pred,
+               challenger = load_model_file()$challenger$validation$test_pred,
+               nbin = input$nbin )$dl_rb_plot ->double_lift
+    
+    output$dl  <- renderPlot({
+      double_lift
+    })
+  })
+  
+  observe({
+    req(load_model_file())
+    KT_plot_compare_gini(n =input$gini_resample_size,
+                         actual = load_model_file()$base$validation$test_weight*load_model_file()$base$validation$test_response,
+                         weight =load_model_file()$base$validation$test_weight,
+                         base = load_model_file()$base$validation$test_pred,
+                         challenger = load_model_file()$challenger$validation$test_pred,normalize = T )->compare_gini
+    
+    output$gini_comparison  <- renderPlot({
+      compare_gini
+    })
+  })
+  
+
 }
+
 
 shinyApp(ui = ui, server = server)
 
+#Note for tomorrow
+# Finish compare stuff
+# Draw diagram,
+# Prepare github some exhibits
+# prepare speech in each part
+# prepare radar, pmml e.t.c

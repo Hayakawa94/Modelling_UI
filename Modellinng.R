@@ -1,369 +1,51 @@
-source("H:/Restricted Share/DA P&U/Tech Modelling/Users/Khoa/RPMtools/RPMtools.R")
+source("H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelling_ui/Reactive_calc.R")
 
 
+# Reason for modelling  GBM in R
+# Better modelling experience in general
+# 1. Fitting raw data i.e. more predictive than banded data
+# 2. More efficient at feature selection i.e. boruta or HP search i.e. Bayes optz or Flaml
+# 3. Better explanation tools such as SHAP which theoretically based on a more realistic assumptions and generally better visualsation compared to PDP
+# 4. Other functionality such as interaction constraints i.e. insurer code or AY
 
-df_eng_sample <- fread("df_eng_sample.csv")
-df_eng_sample <- df_eng_sample %>% sample_n(100000)
-fts<- readRDS("fts.rds")
-model_spec <-list(ad_f_b = list(exposure = 'freqexposure_adbclaim',
-                                response = 'freqmodels_adbclaim',
-                                objective = 'count:poisson',
-                                eval_metric='poisson-nloglik'),
-                  ad_s_b = list(exposure = 'sevexposure_adbclaim',
-                                response = 'sevmodels_adbclaim',
-                                objective = 'reg:gamma',
-                                eval_metric='gamma-nloglik'),
-                  ad_f_c = list(exposure = 'freqexposure_adcclaim',
-                                response = 'freqmodels_adcclaim',
-                                objective = 'count:poisson',
-                                eval_metric='poisson-nloglik'),
-                  ad_s_c = list(exposure = 'sevexposure_adcclaim',
-                                response = 'sevmodels_adcclaim',
-                                objective = 'reg:gamma',
-                                eval_metric='gamma-nloglik'),
-                  eow_f_b = list(exposure = 'freqexposure_eowbclaim',
-                                 response = 'freqmodels_eowbclaim',
-                                 objective = 'count:poisson',
-                                 eval_metric='poisson-nloglik'),
-                  eow_s_b = list(exposure = 'sevexposure_eowbclaim',
-                                 response = 'sevmodels_eowbclaim',
-                                 objective = 'reg:gamma',
-                                 eval_metric='gamma-nloglik'),
-                  eow_f_c = list(exposure = 'freqexposure_eowcclaim',
-                                 response = 'freqmodels_eowcclaim',
-                                 objective = 'count:poisson',
-                                 eval_metric='poisson-nloglik'),
-                  eow_s_c = list(exposure = 'sevexposure_eowcclaim',
-                                 response = 'sevmodels_eowcclaim',
-                                 objective = 'reg:gamma',
-                                 eval_metric='gamma-nloglik'),
-                  flood_f_b = list(exposure = 'freqexposure_floodbclaim',
-                                   response = 'freqmodels_floodbclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik'),
-                  flood_s_b = list(exposure = 'sevexposure_floodbclaim',
-                                   response = 'sevmodels_floodbclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik'),
-                  flood_f_c = list(exposure = 'freqexposure_floodcclaim',
-                                   response = 'freqmodels_floodcclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik'),
-                  flood_s_c = list(exposure = 'sevexposure_floodcclaim',
-                                   response = 'sevmodels_floodcclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik'),
-                  storm_f_b = list(exposure = 'freqexposure_stormbclaim',
-                                   response = 'freqmodels_stormbclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik'),
-                  storm_s_b = list(exposure = 'sevexposure_stormbclaim',
-                                   response = 'sevmodels_stormbclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik'),
-                  storm_f_c = list(exposure = 'freqexposure_stormcclaim',
-                                   response = 'freqmodels_stormcclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik'),
-                  storm_s_c = list(exposure = 'sevexposure_stormcclaim',
-                                   response = 'sevmodels_stormcclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik'),
-                  theft_f_b = list(exposure = 'freqexposure_theftbclaim',
-                                   response = 'freqmodels_theftbclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik'),
-                  theft_s_b = list(exposure = 'sevexposure_theftbclaim',
-                                   response = 'sevmodels_theftbclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik'),
-                  theft_f_c = list(exposure = 'freqexposure_theftcclaim',
-                                   response = 'freqmodels_theftcclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik'),
-                  theft_s_c = list(exposure = 'sevexposure_theftcclaim',
-                                   response = 'sevmodels_theftcclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik'),
-                  fire_f_b = list(exposure = 'freqexposure_firebclaim',
-                                  response = 'freqmodels_firebclaim',
-                                  objective = 'count:poisson',
-                                  eval_metric='poisson-nloglik'),
-                  fire_s_b = list(exposure = 'sevexposure_firebclaim',
-                                  response = 'sevmodels_firebclaim',
-                                  objective = 'reg:gamma',
-                                  eval_metric='gamma-nloglik'),
-                  fire_f_c = list(exposure = 'freqexposure_firecclaim',
-                                  response = 'freqmodels_firecclaim',
-                                  objective = 'count:poisson',
-                                  eval_metric='poisson-nloglik'),
-                  fire_s_c = list(exposure = 'sevexposure_firecclaim',
-                                  response = 'sevmodels_firecclaim',
-                                  objective = 'reg:gamma',
-                                  eval_metric='gamma-nloglik'),
-                  other_f_b = list(exposure = 'freqexposure_otherbclaim',
-                                   response = 'freqmodels_otherbclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik'),
-                  other_s_b = list(exposure = 'sevexposure_otherbclaim',
-                                   response = 'sevmodels_otherbclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik'),
-                  other_f_c = list(exposure = 'freqexposure_othercclaim',
-                                   response = 'freqmodels_othercclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik'),
-                  other_s_c = list(exposure = 'sevexposure_othercclaim',
-                                   response = 'sevmodels_othercclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik'),
-                  subs_f_b = list(exposure = 'freqexposure_subsbclaim',
-                                  response = 'freqmodels_subsbclaim',
-                                  objective = 'count:poisson',
-                                  eval_metric='poisson-nloglik'),
-                  subs_s_b = list(exposure = 'sevexposure_subsbclaim',
-                                  response = 'sevmodels_subsbclaim',
-                                  objective = 'reg:gamma',
-                                  eval_metric='gamma-nloglik'),
-                  unsp_f_pp = list(exposure = 'freqexposure_unspecifiedppcclaim',
-                                   response = 'freqmodels_unspecifiedppcclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik'),
-                  unsp_s_pp = list(exposure = 'sevexposure_unspecifiedppcclaim',
-                                   response = 'sevmodels_unspecifiedppcclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik'))
+# we will have 4 tabs
+# 1. feature selection
+# 2. tune
+# 3. train including feature importance, SHAP ,interaction_gain
+# 3. Model explain
+# 3. Model Comparison
+
+# 6. Model performance
+# 5. Extreme value
+# 7. AvE
+# 8. stability
+
+# Reasons for modelling in Radar
+# 1. Deployability subject to recon
+# 2. WTW ecosystem
+# 3. Predictions unlikely to go wrong
+# 
+# df_eng_sample <- fread("df_eng_sample.csv")
+# train <- df_eng_sample %>% sample_n(100000)
+
 
 
 # Shuffle the dataset
 # df_eng_sample <- df_eng_sample[sample(nrow(df_eng_sample)), ]
 
 
+# train_model
 
-KT_create_sample <- function(df , weight, y, kfold , train_validate_split= 0.8){
-  set.seed(1)
-  if (!missing(kfold)){
-    KT_create_fold_idx(df,k = kfold) -> kfold_idx
-    train <- df
-    train_y <- y
-    train_weight <- weight
-    return(list(train = train , 
-                train_y= train_y , 
-                train_weight=train_weight,
-                kfold_idx = kfold_idx))
-  }else{
-    kfold_idx =NULL
-    idx <- sample(seq_len(nrow(df)), size = 0.8 * nrow(df))
-    train <- df[idx, ]
-    train_y <- y[idx]
-    train_weight <- weight[idx]
-    validate <- df[-idx, ]
-    validate_y <- y[-idx]
-    validate_weight <- weight[-idx]
-    return(list(train = train , 
-                train_y= train_y , 
-                train_weight=train_weight,
-                validate_y=validate_y ,
-                validate_weight=validate_weight, 
-                validate = validate))
-  }
- 
-}
-
-# xgb doesn't like cat variables so need to OHE
-tune_model <- function(fts,
-                       model,
-                       train ,
-                       kfold=0,
-                       train_validate_ratio=0.8,
-                       eta = c(0.01, 0.1),
-                       max_depth = c(2L, 5L),
-                       min_child_weight = c(1, 100),
-                       subsample = c(0.7, 1),
-                       colsample_bytree = c(0.7, 1),
-                       lambda = c(3,3) ,
-                       alpha = c(3,3),
-                       monotonicity_constraints,
-                       interaction_constraints,
-                       nrounds= 100,
-                       parallel = T,
-                       iters.k = 1,
-                       iters.n = 4,
-                       ncluster  =  max(floor(parallel::detectCores()*2/3),1),
-                       initPoints=10 ){
-  
-  weight = model_spec[[model]]$exposure
-  response = model_spec[[model]]$response
-  objective =  model_spec[[model]]$objective
-  eval_metric = model_spec[[model]]$eval_metric
-  train <- train[train[[weight]] >0 ]
-  train_y <- train[[response]]
-  train_weight <- train[[weight]]
-  
-  if (kfold>0){
-    KT_create_sample(df = train, weight = train_weight, y = train_y, kfold = kfold   ) -> sample_result
-  }else{
-    KT_create_sample(df = train, weight = train_weight, y = train_y, train_validate_split =  train_validate_ratio ) -> sample_result
-  }
-  
-
-  
-  if(missing(monotonicity_constraints)){
-    monotonicity_constraints= rep(0,nrow(train)) 
-  }
-  if(missing(interaction_constraints)){
-    interaction_constraints= list() 
-  }
-  min_child_weight * sum(train_weight)
-  
-  bounds =  list(eta=eta ,
-                 max_depth=max_depth ,
-                 min_child_weight=min_child_weight,
-                 subsample=subsample ,
-                 colsample_bytree=colsample_bytree,
-                 lambda=lambda ,
-                 alpha =alpha)
-  
-  lapply(bounds, function(x) if(x[1] == x[2]){x[1]} else{NULL}  ) %>% setNames(names(bounds))  %>% compact() -> fixed_param
-  lapply(bounds, function(x) if(x[1] == x[2]){NULL} else{x}  ) %>% setNames(names(bounds))  %>% compact() -> bounds
-  
-  if (kfold > 0){
-    
-    KT_xgb_baysian_tune(train =  sample_result$train %>% select(fts),
-                        train_y =  sample_result$train_y,
-                        train_weight =  sample_result$train_weight,
-                        folds = sample_result$kfold,
-                        
-                        bounds = bounds,
-                        HP_fixed = fixed_param,
-                        monotonicity_constraints=monotonicity_constraints , 
-                        interaction_constraints=interaction_constraints,
-                        nrounds = nrounds,
-                        objective =objective,
-                        eval_metric = eval_metric,
-                        parallel =parallel,
-                        iters.k = iters.k,
-                        iters.n = 4,
-                        ncluster = ncluster , 
-                        initPoints =  initPoints )
-  }else{
-    
-    KT_xgb_baysian_tune(train =  sample_result$train %>% select(fts),
-                        train_y =  sample_result$train_y,
-                        train_weight =  sample_result$train_weight,
-                        validate =  sample_result$validate %>%  select(fts),
-                        validate_y =  sample_result$validate_y,
-                        validate_weight =  sample_result$validate_weight,
-                        bounds = bounds,
-                        HP_fixed = fixed_param,
-                        monotonicity_constraints=monotonicity_constraints , 
-                        interaction_constraints=interaction_constraints,
-                        nrounds = nrounds,
-                        objective =objective,
-                        eval_metric = eval_metric,
-                        parallel =parallel,
-                        iters.k = iters.k,
-                        iters.n = 4,
-                        ncluster = ncluster , 
-                        initPoints =  initPoints )
-  }
-
-  
-}
 
 # target_cols <- df_eng_sample %>% select(starts_with(c("freq" , "sev" , "exposure"))) %>%  names()
 # df_eng_sample %>% select(-target_cols) %>% select_if(~is.numeric(.) ) %>% names -> fts
+# 
+# start = Sys.time()
+# tune_model(fts = fts[1:20], model = "eow_f_b",train =train ) -> test
+# train_model(fts = fts,model = "eow_s_b",train = train,parallel = T,max_depth = 10, nrounds = 30 ) -> test2
+# Sys.time() -start
 
-start = Sys.time()
-tune_model(fts = fts, kfold = 4, model = "eow_f_b",train = df_eng_sample) -> test
-Sys.time() -start
 
-library(shiny)
-library(rhandsontable)
-library(plotly)
-library(DT)
-
-ui <- fluidPage(
-  titlePanel("Tick Box Table with Duplicate Tabs"),
-  tabsetPanel(
-    tabPanel("Feature Spec",
-             sidebarLayout(
-               sidebarPanel(
-                 actionButton("reset_table", "Reset Table"),
-                 actionButton("load_feature", "Load Feature Spec"),
-                 actionButton("save_feature", "Save Feature Spec"),
-                 textInput("file_name_feature", "File Name", value = "feature_spec")
-               ),
-               mainPanel(
-                 textOutput("action_message_feature"),
-                 rHandsontableOutput("ft_table")
-               )
-             )
-    ),
-    tabPanel("Tuning",
-             sidebarLayout(
-               sidebarPanel(
-                 actionButton("load_tuning", "Load Tuning"),
-                 actionButton("save_tuning", "Save Tuning"),
-                 textInput("file_name_tuning", "File Name", value = "tuning"),
-                 checkboxInput("Distribute_Computation", "Distribute Computation", value = TRUE),
-                 br(), 
-                 actionButton("Sampling", "Sampling"),
-                 conditionalPanel(
-                   condition = "input.Sampling % 2 == 1",
-                   checkboxInput("Trainvalidate", "Train Validate Split", value = TRUE),
-                   sliderInput("Ratio", "Ratio:", min = 0.5, max = 1, value = 0.8, step = 0.001),
-                   checkboxInput("kfold", "kfold", value = F),
-                   sliderInput("kfold_val", "Select numner of fold:", min = 2, max = 10, value = 5, step = 1)
-                 )
-               ,
-                 br(),  # Line break for spacing
-                 selectInput("model", "Select Model", choices = names(model_spec)),
-                 actionButton("tune", "Tune Model"),
-                 actionButton("Select_HP_bounds", "HP Bounds"),
-                 conditionalPanel(
-                   condition = "input.Select_HP_bounds % 2 == 1",
-                   sliderInput("eta", "Learning Rate (eta):", min = 0.001, max = 0.3, value = c(0.001, 0.1), step = 0.001),
-                   sliderInput("min_child_weight", "Minimum Child Weight:", min = 0.0001, max = 0.1, value = c(0.0001, 0.01), step = 0.0001),
-                   sliderInput("max_depth", "Max Depth:", min = 1, max = 15, value = c(1, 5), step = 1),
-                   sliderInput("alpha", "alpha (L1 regularization):", min = 0, max = 1, value = c(0.001, 0.2), step = 0.001),
-                   sliderInput("lambda", "lambda (L2 regularization):", min = 0, max = 10, value = c(0.001, 2), step = 0.01),
-                   sliderInput("colsample_bytree", "colsample bytree:", min = 0.1, max = 1, value = c(0.2, 0.4), step = 0.01),
-                   sliderInput("subsample", "Subsample:", min = 0.1, max = 1, value = c(0.2, 0.4), step = 0.01),
-                   sliderInput("nrounds", "Number of Rounds:", min = 10, max = 500, value = 100)
-                 )
-               ),
-               mainPanel(
-                 tabsetPanel(
-                   tabPanel("tune_iteration", plotlyOutput("tune_iteration_plot")),
-                   tabPanel("eta", plotlyOutput("eta_plot")),
-                   tabPanel("max_depth", plotlyOutput("max_depth_plot")),
-                   tabPanel("min_child_weight", plotlyOutput("min_child_weight_plot")),
-                   tabPanel("colsample_bytree", plotlyOutput("colsample_bytree_plot")),
-                   tabPanel("lambda", plotlyOutput("lambda_plot")),
-                   tabPanel("alpha", plotlyOutput("alpha_plot")),
-                   tabPanel("Tune_result", DT::dataTableOutput("opt_result_plot"))
-                 ),
-                 textOutput("action_message_tuning")
-               )
-             )
-    ),
-    tabPanel("Train Model",
-             sidebarLayout(
-               sidebarPanel(
-                 actionButton("reset_table", "Reset Table"),
-                 actionButton("load_feature", "Load Feature Spec"),
-                 actionButton("save_feature", "Save Feature Spec"),
-                 textInput("file_name_feature", "File Name", value = "feature_spec")
-               ),
-               mainPanel(
-                 textOutput("action_message_feature"),
-                 rHandsontableOutput("ft_table")
-               )
-             )
-    )
-  )
-)
 
 server <- function(input, output, session) {
   initial_data <- data.frame(
@@ -373,6 +55,54 @@ server <- function(input, output, session) {
     Interaction_Constraints = rep(FALSE, length(fts)),
     stringsAsFactors = FALSE
   )
+  
+  observeEvent(input$kfold, {
+    if (input$kfold) {
+      updateCheckboxInput(session, "Trainvalidate", value = FALSE)
+    }
+  })
+  
+  observeEvent(input$Trainvalidate, {
+    if (input$Trainvalidate) {
+      updateCheckboxInput(session, "kfold", value = FALSE)
+    }
+  })
+  
+  
+  EDA_result<- eventReactive(input$EDA, {
+    
+    weight = model_spec[[input$model]]$exposure
+    response = model_spec[[input$model]]$response
+    objective =  model_spec[[input$model]]$objective
+    eval_metric = model_spec[[input$model]]$eval_metric
+    train <- train[train[[weight]] >0 ]
+    train_y <- train[[response]]
+    train_weight <- train[[weight]]
+    
+    
+    req(input$ft_table)
+    ft_spec_table <- hot_to_r(input$ft_table)
+    fts_to_tune <- ft_spec_table$Features[which(ft_spec_table$Use_Feature == TRUE)]
+    
+    EDA<- summarise_dataframe(train %>% select(fts_to_tune) )
+    total_weighted_response <- sum(train_y*train_weight)
+    total_exposure <- sum(train_weight)
+    weighted_avg_response <- total_weighted_response/total_exposure
+    Max_response = max(train_y)
+    Min_response = min(train_y)
+    max_weight = max(train_weight)
+    min_weight = min(train_weight)
+    
+    list(EDA = EDA, Claim_data = data.table(total_weighted_response,
+                                            weighted_avg_response,
+                                            Max_response,
+                                            Min_response,
+                                            max_weight,
+                                            min_weight,
+                                            total_weight=total_exposure, 
+                                            Total_Risk = length(train_y)) %>% melt)
+                                          
+  })
   
   # Reactive value to store the table data
   table_data <- reactiveVal(initial_data)
@@ -390,16 +120,28 @@ server <- function(input, output, session) {
     output$action_message_feature <- renderText("Table has been reset to initial data.")
   })
   
+  
+
+  observeEvent(input$select_all, {
+    table_data(initial_data %>% mutate(Use_Feature = rep(T, length(fts))))
+    
+  })
+  
+  
+  
+  
   tune_result <- eventReactive(input$tune, {
     gc()
-    if (input$kfold ){
+    if (input$kfold == T    ){
       kfold = input$kfold_val
     }else{
       kfold = 0
     }
     req(input$ft_table)
-    ft_spec_table <- hot_to_r(input$ft_table)
-    fts_to_tune <- ft_spec_table$Features[which(ft_spec_table$Use_Feature == TRUE)]
+    ft_spec_table <- hot_to_r(input$ft_table)%>% filter(Use_Feature==T) 
+    fts_to_tune <- ft_spec_table$Features
+    ft_spec_table %>% filter(Use_Feature==T ) %>% select(Monotonicity) %>% pull -> monotonicity_constraints
+    interaction_constraints <-  lapply(which(ft_spec_table$Interaction_Constraints==T),function(x) c(x)) 
     tune_model(fts = fts_to_tune,
                model = input$model,
                train = train,
@@ -412,7 +154,44 @@ server <- function(input, output, session) {
                colsample_bytree = input$colsample_bytree,
                lambda = input$lambda,
                alpha = input$alpha,
-               nrounds = input$nrounds,parallel = input$Distribute_Computaion)
+               nrounds = input$nrounds,
+               parallel = input$Distribute_Computation,
+               interaction_constraints = interaction_constraints,
+               monotonicity_constraints =monotonicity_constraints )
+  })
+  
+  
+  
+  train_result <- eventReactive(input$train, {
+    gc()
+    if (input$kfold == T    ){
+      kfold = input$kfold_val
+    }else{
+      kfold = 0
+    }
+    req(input$ft_table)
+    ft_spec_table <- hot_to_r(input$ft_table)
+    fts_to_train <- ft_spec_table$Features[which(ft_spec_table$Use_Feature == TRUE)]
+    ft_spec_table %>% filter(Use_Feature==T ) %>% select(Monotonicity) %>% pull -> monotonicity_constraints
+    ft_spec_table %>% filter(Use_Feature==T & Interaction_Constraints ==T) %>% select(Features) %>% pull -> interaction_constraints
+    interaction_constraints <- lapply(interaction_constraints,function(x) c(x)) 
+    train_model(fts = fts_to_train,
+               model = input$model,
+               train = train,
+               kfold = kfold,
+               train_validate_ratio = input$Ratio,
+               use_tunred_HP = NULL,
+               eta = input$eta,
+               max_depth = input$max_depth,
+               min_child_weight = input$min_child_weight,
+               subsample = input$subsample,
+               colsample_bytree = input$colsample_bytree,
+               lambda = input$lambda,
+               alpha = input$alpha,
+               nrounds = input$nrounds,
+               parallel = input$Distribute_Computation,
+               interaction_constraints = interaction_constraints,
+               monotonicity_constraints =monotonicity_constraints )
   })
   
   output$tune_iteration_plot <- renderPlotly({
@@ -443,6 +222,15 @@ server <- function(input, output, session) {
     tune_result()$opt_results %>% mutate_all(~ round(., 3))
   })
   
+  output$EDA_data <- DT::renderDataTable({
+    datatable( EDA_result()$EDA ,options =  list(pageLength = 25) ) 
+  })
+  
+  output$Claim <- DT::renderDataTable({
+    EDA_result()$Claim_data 
+  })
+  
+  
   # Function to save Feature Spec tab state
   save_feature_spec <- function() {
     final_data <- hot_to_r(input$ft_table)
@@ -471,17 +259,7 @@ server <- function(input, output, session) {
   # Function to save Tuning tab state
   save_tuning <- function() {
     file_name <- paste0(input$file_name_tuning, ".rds")
-    saveRDS(list(inputs = reactiveValuesToList(input), plots = list(
-      tune_iteration = tune_result()$hyperparameters_trends$tune_iteration,
-      eta = tune_result()$hyperparameters_trends$eta,
-      max_depth = tune_result()$hyperparameters_trends$max_depth,
-      min_child_weight = tune_result()$hyperparameters_trends$min_child_weight,
-      subsample = tune_result()$hyperparameters_trends$subsample,
-      colsample_bytree = tune_result()$hyperparameters_trends$colsample_bytree,
-      lambda = tune_result()$hyperparameters_trends$lambda,
-      alpha = tune_result()$hyperparameters_trends$alpha,
-      opt_result = tune_result()$opt_results
-    )), file_name)
+    saveRDS(list(inputs = reactiveValuesToList(input), optz_result = tune_result()), file_name)
     output$action_message_tuning <- renderText("Tuning state has been saved.")
   }
   
@@ -519,3 +297,4 @@ server <- function(input, output, session) {
 }
 
 shinyApp(ui = ui, server = server)
+

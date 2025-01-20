@@ -3,7 +3,7 @@ library(rhandsontable)
 library(plotly)
 library(DT)
 library(DiagrammeR)
-ui <- fluidPage(
+ui <- fluidPage(useShinyjs(),
   tags$head(
     tags$style(HTML("
       .full-width-btn {
@@ -56,24 +56,54 @@ ui <- fluidPage(
                  actionButton("reset_table", "Reset Table", class = "full-width-btn"),
                  actionButton("select_all", "Select all features", class = "full-width-btn"),
                  tags$hr(),
-                 actionButton("EDA", "Update Data", class = "full-width-btn"),
+                 actionButton("EDA", "EDA", class = "full-width-btn"),
                  tags$hr()
                ),
                mainPanel(
                  textOutput("action_message_feature"),
                  tabsetPanel(
                    tabPanel("Feature_Selection", rHandsontableOutput("ft_table")),
-                   tabPanel("EDA", DT::dataTableOutput("EDA_data")),
-                   tabPanel("Claim", DT::dataTableOutput("Claim"))
+                   tabPanel("Data", DT::dataTableOutput("EDA_data")),
+                   tabPanel("Claim", DT::dataTableOutput("Claim")),
+                   tabPanel("Correlation" , uiOutput("corr_topn_slider"),plotlyOutput("corr_plot", width = "1000", height = "1000") )
                  )
                )
+             )
+    ),
+    tabPanel("Boruta Feature selection",
+             sidebarLayout(
+               sidebarPanel(
+                 actionButton("load_boruta", "Load Result"),
+                 # actionButton("save_boruta", "Save Result"),
+                 textInput("file_name_boruta", "File Name", value = "boruta_out"),
+                 
+                 actionButton("Boruta_Select_Params", "Select Params", class = "full-width-btn"),
+                 conditionalPanel(
+                   condition = "input.Boruta_Select_Params % 2 == 1",
+                   sliderInput("Boruta_max_run", "Max Run):", min = 30, max = 1000, value =50, step = 1),
+                   sliderInput("Boruta_eta", "Learning Rate (eta):", min = 0.001, max = 0.3, value = 0.1, step = 0.001),
+                   sliderInput("Boruta_max_depth", "Max Depth:", min = 1, max = 15, value =  5, step = 1),
+                   sliderInput("Boruta_nrounds", "Number of Rounds:", min = 10, max = 2000, value = 100, step = 1)
+                 ), 
+                 hidden(actionButton("Update_ft_spec", "Update Feature_spec", class = "full-width-btn")) 
+               ),
+               mainPanel(
+                 div(class = "tune-btn-container",
+                     actionButton("Boruta_run", "Boruta run", class = "full-width-btn red-btn")
+                 ),
+                 tabsetPanel(
+                   tabPanel("Boruta imp", plotOutput("Boruta_imp", width = "1000", height = "1000")),
+                   tabPanel("Boruta shap imp", 
+                            plotOutput("Boruta_shap_imp", width = "1000", height = "1000")),
+                                  )
+             )
              )
     ),
     tabPanel("Tuning",
              sidebarLayout(
                sidebarPanel(
                  actionButton("load_tuning", "Load Tuning"),
-                 actionButton("save_tuning", "Save Tuning"),
+                 # actionButton("save_tuning", "Save Tuning"),
                  textInput("file_name_tuning", "File Name", value = "tuning"),
                  tags$hr(),
                  actionButton("Sampling", "Sampling", class = "full-width-btn"),
@@ -109,8 +139,10 @@ ui <- fluidPage(
                    tabPanel("max_depth", plotlyOutput("max_depth_plot")),
                    tabPanel("min_child_weight", plotlyOutput("min_child_weight_plot")),
                    tabPanel("colsample_bytree", plotlyOutput("colsample_bytree_plot")),
+                   tabPanel("Subsample", plotlyOutput("subsample_plot")),
                    tabPanel("lambda", plotlyOutput("lambda_plot")),
                    tabPanel("alpha", plotlyOutput("alpha_plot")),
+                   tabPanel("Min Split Loss", plotlyOutput("gamma_plot")),
                    tabPanel("Tune_result", DT::dataTableOutput("opt_result_plot"))
                  ),
                  textOutput("action_message_tuning")
@@ -120,8 +152,8 @@ ui <- fluidPage(
     tabPanel("Training",
              sidebarLayout(
                sidebarPanel(
-                 actionButton("load_Training", "Load Training"),
-                 actionButton("save_Training", "Save Training"),
+                 actionButton("load_Training", "Load Experiment"),
+                 # actionButton("save_Training", "Save Training"),
                  textInput("file_name_Training", "File Name", value = "Training"),
                  tags$hr(),
                  actionButton("load_tuning_result", "Load Tuned HPs"),
@@ -157,6 +189,7 @@ ui <- fluidPage(
                      actionButton("train", "Train Model", class = "full-width-btn red-btn")
                  ),
                  tabsetPanel(
+                   tabPanel("SHAP imp vs Gain imp", plotOutput("imp_comparison",width = "1000", height = "1000")),
                    tabPanel("Feature Importance (SHAPley value contribution)", plotlyOutput("SHAP_imp_plot")),
                    tabPanel("SHAP_Interaction_matrix", 
                             sliderInput("top_shap_X", "Top X", min = 1, max = 40, value = 8, step = 1),
@@ -201,7 +234,7 @@ ui <- fluidPage(
              sidebarLayout(
                sidebarPanel(
                  actionButton("load_trained_model", "Load model"),
-                 textInput("file_name_SHAP", "File Name", value = "Training"),
+                 # textInput("file_name_SHAP", "File Name", value = "Training"),
                  tags$hr(),
                  sliderInput("SHAP_sample_size", "Sample Size", min = 0.001, max = 1, value = 1, step = .0001),
                  sliderInput("SHAP_smooth_strength", "Smooth Strength", min = 0, max = 1, value = 0.9, step = .001),
@@ -237,9 +270,9 @@ ui <- fluidPage(
     tabPanel("Overlays",
              sidebarLayout(
                sidebarPanel(
-                 actionButton("Load_base_model", "Load base model"),
-                 textInput("Base_pred_path", "Base Model", value = "Training"),
-                 tags$hr(),
+                 
+                 # textInput("Base_pred_path", "Base Model", value = "Training"),
+                 # tags$hr(),
                  actionButton("save_glm", "Save Splines"),
                  actionButton("load_glm", "Load Splines"),
                  textInput("glm_overlay_out", "glm_overlay_out_path", value = "glm_overlays"),
@@ -248,7 +281,7 @@ ui <- fluidPage(
                  actionButton("reset", "Reset Drawing"),
                  tags$hr(),
                  selectInput("ft", "Select Feature", choices = sort(fts)),
-                 selectInput("factor_consistency", "Select Interaction:", choices = fts),
+                 hidden(selectInput("factor_consistency", "Select Interaction:", choices = fts)) ,
                  checkboxGroupInput("undo_shapes", "Select Spline Undo", choices = NULL),
                  actionButton("undo", "Undo")
 
@@ -266,9 +299,10 @@ ui <- fluidPage(
                                                         selected = c("CA_challenger", "obs", "CU_unadj_challenger", "CU_unadj_base"),
                                                         inline = TRUE
                                      ),
+                                     tableOutput("glm_fit"),
                                      plotlyOutput("overlay_plot"),
-                                     plotlyOutput("avePlot"),  # Placing avePlot below overlay_plot
-                                     tableOutput("glm_fit")
+                                     plotlyOutput("avePlot")  # Placing avePlot below overlay_plot
+                                     
                             ),
                             tabPanel("Model Summary",
                                      verbatimTextOutput("glm_summary")
@@ -276,6 +310,7 @@ ui <- fluidPage(
                           )
                    ),
                    column(4,  # Adjust the width as needed
+                          actionButton("Load_base_model", "Load AvE"),
                           sliderInput("samplesize", "Sample Size:", value = 1, min = 0.01, max = 1),
                           checkboxInput("rebase", "Rebase:", value = TRUE),
                           selectInput("filter_feature", "Select Feature to Filter:", choices = NULL),
@@ -301,6 +336,50 @@ ui <- fluidPage(
                    )
                  ),
                  tableOutput("aveTable")
+               )
+             )
+    ),
+    tabPanel("Model Performance",
+             sidebarLayout(
+               sidebarPanel(
+                 actionButton("performance", "Run_performance", class = "full-width-btn"),
+                 sliderInput("n_resample" , "resample n "  , value = 10  ,min = 5 , max = 200 , step = 1),
+                 sliderInput("lift_plot_bin" , "bin "  , value = 10  ,min = 5 , max = 500 , step = 1)),
+
+               mainPanel(
+                 tabsetPanel(
+                   tabPanel("Lift", plotlyOutput("lift_train"),plotlyOutput("lift_test")),
+                   tabPanel("Gini", plotOutput("gini")),
+                   tabPanel("Stability", plotOutput("stability1"),
+                            plotlyOutput("stability2"))
+                 )
+               )
+             )
+    ),
+    tabPanel("Model Comparison",
+             sidebarLayout(
+               sidebarPanel(textInput("base_file", "Base File Name", value = "Training"),
+                            textInput("challenger_file", "Challenger File Name", value = "Training"),
+                 actionButton("Run_comparison", "Run_comparison", class = "full-width-btn")),
+               mainPanel(
+                 tabsetPanel(
+                   tabPanel("SHAP trend", 
+                            selectInput("SHAP_common_ft", "Select feature:", choices = NULL),
+                            sliderInput("SHAP_comp_smooth_strength", "Smooth Strength:", value = 0.75, min = 0, max = 1),
+                            plotOutput("shap_model_comparison")),
+                   tabPanel("Hyperparameters", DT::dataTableOutput("compare_hp")),
+                   tabPanel("SHAP importance", plotOutput("SHAP_imp_comparison",width = "1000", height = "1000")),
+                   tabPanel("Gain importance", plotOutput("gain_imp_comparison",width = "1000", height = "1000")),
+                   tabPanel("Stability", plotOutput("stability_comparison")),
+                   tabPanel("Gini", 
+                            sliderInput("gini_resample_size", "Resample size", value = 10, min = 5, max = 120, step = 1),
+                            plotOutput("gini_comparison")),
+                   tabPanel("double lift", 
+                            sliderInput("dl_resample_size", "Resample size", value = 20, min = 15, max = 120, step = 1),
+                            sliderInput("nbin", "nbin", value = 20, min = 10, max = 120, step = 1),
+                            plotOutput("dl"))
+                   
+                 )
                )
              )
     )

@@ -174,6 +174,8 @@ train_model <- function(fts,
                         use_tunred_HP= NULL,
                         min_child_weight,
                         early_stopping_rounds,
+                        seed = 1,
+                        return_pred_only = F,
                         ...
 ){
   
@@ -226,43 +228,54 @@ train_model <- function(fts,
                  validate_weight =  sample_result$validate_weight,
                  params = params,
                  nthread = nthread,
-                 early_stopping_rounds = early_stopping_rounds) -> train_result
+                 early_stopping_rounds = early_stopping_rounds,
+                 seed = seed) -> train_result
   }
-  
-  explain_result <- KT_xgb_explain(model = train_result$model, pred_data = sample_result$train %>% select(fts) )
-  
-  pred <- predict(train_result$model ,newdata =as.matrix(train %>% select(fts))   , type  = "response")
-  
-  
-  return(list(imp_plot = list(imp_gain   = train_result$imp_plot,
-                              imp_shap = explain_result$ft_importance_plot,
-                              imp_shap_X = explain_result$ft_importance_X,
-                              EIXinteraction_gain_matrix  =explain_result$EIXimportance_matrix,
-                              EIX_gain=explain_result$EIXimportance,
-                              EIXinteraction_gain=explain_result$EIXimportanceX
-                              ),
-              shap_values = list(main_effect =explain_result$main_effect,
-                                 interaction_effect = explain_result$interaction ),
-              model =train_result$model,
-              pred = pred,
-              pmml_fmap =    r2pmml::as.fmap(as.matrix(sample_result$train %>% select(train_result$model$feature_names)))))
+  if(return_pred_only){
+    return(predict(train_result$model ,newdata =as.matrix(train %>% select(fts))   , type  = "response"))
+  }
+  else{
+    explain_result <- KT_xgb_explain(model = train_result$model, pred_data = sample_result$train %>% select(fts) )
+    
+    pred <- predict(train_result$model ,newdata =as.matrix(train %>% select(fts))   , type  = "response")
+    
+    
+    return(list(imp_plot = list(imp_gain   = train_result$imp_plot,
+                                imp_shap = explain_result$ft_importance_plot,
+                                imp_shap_X = explain_result$ft_importance_X,
+                                EIXinteraction_gain_matrix  =explain_result$EIXimportance_matrix,
+                                EIX_gain=explain_result$EIXimportance,
+                                EIXinteraction_gain=explain_result$EIXimportanceX
+    ),
+    shap_values = list(main_effect =explain_result$main_effect,
+                       interaction_effect = explain_result$interaction ),
+    model =train_result$model,
+    pred = pred,
+    pmml_fmap =    r2pmml::as.fmap(as.matrix(sample_result$train %>% select(train_result$model$feature_names)))))
+  }
+ 
 }
 
 
 
-glm_fit <- function(glm_train,splines_dt, response , base , weight ,fam ){
-  overlay_fts_dt <- data.table(idx  = 1:length(weight))
+create_splines <- function(df,splines_dt){
+  overlay_fts_dt <- data.table(idx  = 1:nrow(df))
   for(i in  1:nrow(splines_dt)){
     feature <- splines_dt[["feature"]][i]
     spline <- splines_dt[["id"]][i]
     min_val  <- splines_dt[["x0"]][i]
     max_val <- splines_dt[["x1"]][i]
-    overlay_fts_dt[[spline]] <- normalize_feature(feature = glm_train[[feature]],min_val =min_val,max_val =  max_val  )
+    overlay_fts_dt[[spline]] <- normalize_feature(feature = df[[feature]],min_val =min_val,max_val =  max_val  )
     
   }
-  x <- model.matrix(~ . ,  data =overlay_fts_dt %>% select(-idx) )
+  return(overlay_fts_dt %>% select(-idx))
+}
+
+glm_fit <- function(glm_train,splines_dt, response , base , weight ,fam ){
+
+  overlay_fts_dt<- create_splines(df =glm_train,splines_dt=splines_dt  )
   
-  
+  x <- model.matrix(~ . ,  data =overlay_fts_dt )
   
   base_ave <- response/ base 
   suppressWarnings({
@@ -586,5 +599,3 @@ model_spec <-list(ad_f_b = list(exposure = 'freqexposure_adbclaim',
                                    objective = 'reg:gamma',
                                    eval_metric='gamma-nloglik',
                                    fam = Gamma(link = "log")))
-
-# fts<- readRDS("fts.rds")
