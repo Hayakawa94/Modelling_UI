@@ -3,6 +3,7 @@ source("H:/Restricted Share/DA P&U/Tech Modelling/Users/Khoa/RPMtools/RPMtools.R
 library("flexdashboard")
 
 summarise_dataframe <- function(df) {
+  gc()
   summary <- data.frame(
     Feature = character(),
     Min = numeric(),
@@ -37,33 +38,40 @@ summarise_dataframe <- function(df) {
 # test<- KT_create_sample(df = df_eng_sample,df_eng_sample$exposure,y = df_eng_sample$freqexposure_eowbclaim,kfold = 4 )
 
 KT_create_sample <- function(df , weight, y, kfold , train_validate_split= 0.8){
+  gc()
   set.seed(1)
   if (!missing(kfold)){
     KT_create_fold_idx(df,k = kfold) -> kfold_idx
     train <- df
     train_y <- y
     train_weight <- weight
+    
+    print(glue("train dim:{dim(train)} with {kfold} fold(s)"))
     return(list(train = train , 
                 train_y= train_y , 
                 train_weight=train_weight,
                 kfold_idx = kfold_idx))
   }else{
     kfold_idx =NULL
-    idx <- sample(seq_len(nrow(df)), size = 0.8 * nrow(df))
+    idx <- sample(seq_len(nrow(df)), size = train_validate_split * nrow(df))
     train <- df[idx, ]
     train_y <- y[idx]
     train_weight <- weight[idx]
     validate <- df[-idx, ]
     validate_y <- y[-idx]
     validate_weight <- weight[-idx]
+    
+    print(glue("train dim:{dim(train) } | validate dim:{dim(validate)}"))
+
     return(list(train = train , 
                 train_y= train_y , 
                 train_weight=train_weight,
                 validate_y=validate_y ,
                 validate_weight=validate_weight, 
                 validate = validate))
-  }
   
+  }
+  gc()
 }
 
 # xgb doesn't like cat variables so need to OHE
@@ -86,9 +94,9 @@ tune_model <- function(fts,
                        parallel = T,
                        iters.k = 1,
                        iters.n = 4,
-                       ncluster  =  max(floor(parallel::detectCores()*2/3),1),
+                       ncluster  = parallel::detectCores()-1,
                        initPoints=10 ){
-  
+  gc()
   weight = model_spec[[model]]$exposure
   response = model_spec[[model]]$response
   objective =  model_spec[[model]]$objective
@@ -113,14 +121,14 @@ tune_model <- function(fts,
                  lambda=lambda ,
                  alpha =alpha,
                  gamma=gamma)
-  
+
   lapply(bounds, function(x) if(x[1] == x[2]){x[1]} else{NULL}  ) %>% setNames(names(bounds))  %>% compact() -> fixed_param
   lapply(bounds, function(x) if(x[1] == x[2]){NULL} else{x}  ) %>% setNames(names(bounds))  %>% compact() -> bounds
   
   if (kfold > 0){
     
     
-    
+    return(
     KT_xgb_baysian_tune(train =  sample_result$train %>% select(fts),
                         train_y =  sample_result$train_y,
                         train_weight =  sample_result$train_weight,
@@ -137,10 +145,10 @@ tune_model <- function(fts,
                         iters.k = iters.k,
                         iters.n = 4,
                         ncluster = ncluster , 
-                        initPoints =  initPoints )
+                        initPoints =  initPoints ))
   }else{
     
-    KT_xgb_baysian_tune(train =  sample_result$train %>% select(fts),
+   return( KT_xgb_baysian_tune(train =  sample_result$train %>% select(fts),
                         train_y =  sample_result$train_y,
                         train_weight =  sample_result$train_weight,
                         validate =  sample_result$validate %>%  select(fts),
@@ -157,9 +165,9 @@ tune_model <- function(fts,
                         iters.k = iters.k,
                         iters.n = 4,
                         ncluster = ncluster , 
-                        initPoints =  initPoints )
+                        initPoints =  initPoints ))
   }
-  
+  gc()
   
 }
 
@@ -176,9 +184,10 @@ train_model <- function(fts,
                         early_stopping_rounds,
                         seed = 1,
                         return_pred_only = F,
+                      
                         ...
 ){
-  
+  gc()
   weight = model_spec[[model]]$exposure
   response = model_spec[[model]]$response
   objective =  model_spec[[model]]$objective
@@ -202,12 +211,12 @@ train_model <- function(fts,
     params =  list(objective =objective ,eval_metric=eval_metric,min_child_weight=min_child_weight, ...)
   }
   if(parallel){
-    nthread =  max(floor(parallel::detectCores()*2/3),1)
+    nthread =  detectCores()
   }else{
     nthread = -1
   }
   
- 
+  
   
   if (kfold > 0){
     
@@ -242,6 +251,10 @@ train_model <- function(fts,
     
     return(list(imp_plot = list(imp_gain   = train_result$imp_plot,
                                 imp_shap = explain_result$ft_importance_plot,
+                                imp_comparison =    KT_plot_compare_ft_imp(train_result$imp_plot$data$Feature,
+                                                                           explain_result$ft_importance_plot$data$variable) +
+                                  theme(legend.position = "none") +
+                                  theme_light(base_size = 18) + ggtitle("gain vs SHAP importance") ,
                                 imp_shap_X = explain_result$ft_importance_X,
                                 EIXinteraction_gain_matrix  =explain_result$EIXimportance_matrix,
                                 EIX_gain=explain_result$EIXimportance,
@@ -253,26 +266,27 @@ train_model <- function(fts,
     pred = pred,
     pmml_fmap =    r2pmml::as.fmap(as.matrix(sample_result$train %>% select(train_result$model$feature_names)))))
   }
- 
+  gc()
 }
 
 
 
 create_splines <- function(df,splines_dt){
+  gc()
   overlay_fts_dt <- data.table(idx  = 1:nrow(df))
   for(i in  1:nrow(splines_dt)){
     feature <- splines_dt[["feature"]][i]
     spline <- splines_dt[["id"]][i]
-    min_val  <- splines_dt[["x0"]][i]
-    max_val <- splines_dt[["x1"]][i]
+    min_val  <- as.numeric( splines_dt[["x0_lvl_name"]][i] )
+    max_val <- as.numeric( splines_dt[["x1_lvl_name"]][i])
     overlay_fts_dt[[spline]] <- normalize_feature(feature = df[[feature]],min_val =min_val,max_val =  max_val  )
     
   }
   return(overlay_fts_dt %>% select(-idx))
 }
-
+Sys.time() -> t0
 glm_fit <- function(glm_train,splines_dt, response , base , weight ,fam ){
-
+ 
   overlay_fts_dt<- create_splines(df =glm_train,splines_dt=splines_dt  )
   
   x <- model.matrix(~ . ,  data =overlay_fts_dt )
@@ -288,9 +302,9 @@ glm_fit <- function(glm_train,splines_dt, response , base , weight ,fam ){
     id = names(coefficients),
     estimate = exp(  coefficients)
   )
-  
+  print(glue("glm fit total run time {Sys.time() - t0}")) 
   return(list(adj=adj, model = adj_fit, fit = result, model =adj_fit ))
-  
+  gc()
   
 }  
 
@@ -301,13 +315,21 @@ normalize_feature <- function(feature, min_val, max_val) {
 
 
 plot_fit = function(ft,actual,pred,challenger, weight,ft_name, rebase = T, point_size = 2, lwd = 0.8, 
-                    fit_lines =  c("CA_base", "CA_challenger", "obs", "CU_unadj_base", "CU_unadj_challenger")){
+                    fit_lines =  c("CA_base", "CA_challenger", "obs", "CU_unadj_base", "CU_unadj_challenger"),
+                    band_ft =T,
+                    nbreaks=20){
   
-  
+  # browser()
   if(rebase){
     pred =   pred*(sum(actual)/sum(pred*weight )) # rebase
     challenger =   challenger*(sum(actual)/sum(challenger*weight )) # rebase
   }
+  ft <- if (band_ft){
+       band_data(ft,nbreaks = nbreaks)
+      }else{
+        ft
+      }
+   
   
   df = data.frame(ft,actual,pred,challenger,weight )
   df %>% 
@@ -358,18 +380,25 @@ plot_fit = function(ft,actual,pred,challenger, weight,ft_name, rebase = T, point
                                   "CU_unadj_base" =16,
                                   "CU_unadj_challenger" = 3))+
     xlab(ft_name)+
+    theme(axis.text.x = element_text(angle = 40, vjust = 1, hjust=0.9))+
     
     
     scale_y_continuous(name = "",sec.axis = sec_axis(~.*max(ave_df[variable == "weight"]$value), name="weight")) 
-  
+
 }
 
 
 
 # Define your function here
-calc_ave <- function(ft, actual, pred, weight, challenger, factor_consistency,ft_name, rebase = FALSE) {
+calc_ave <- function(ft, actual, pred, weight, challenger, factor_consistency,ft_name, rebase = FALSE , band_ft = T,nbreaks=20 ) {
   # Convert to data.table
+  gc()
   
+  ft <- if (band_ft){
+    band_data(ft,nbreaks = nbreaks)
+  }else{
+    ft
+  }
   
   
   df <- data.table(ft =ft,
@@ -402,13 +431,15 @@ calc_ave <- function(ft, actual, pred, weight, challenger, factor_consistency,ft
     ylab("Actual/Expected") +
     xlab(ft_name)
     
-  
+ 
   return(list(ave_df = ave_df, ave_plot = p, rebase_data = if (rebase) rb_factor else NULL))
+  gc()
 }
 
 cosmetic_changes <- function(p, alpha_pt=1,alpha_line=0.5, size_pt =2, size_line=1, fit_loess = T  ,  smooth_strength = 0.4, control_yaxis = T ,  upper_lim  = 2, lower_lim = 0){
   # p = test_plot$ave_plot
-  p$layers[[2]]$aes_params$size = size_pt
+  gc()
+   p$layers[[2]]$aes_params$size = size_pt
   p$layers[[2]]$aes_params$alpha = alpha_pt
   p$layers[[3]]$aes_params$size = size_line
   p$layers[[3]]$aes_params$alpha = alpha_line
@@ -436,166 +467,104 @@ cosmetic_changes <- function(p, alpha_pt=1,alpha_line=0.5, size_pt =2, size_line
     )
   )
   return(list(ave_plot = pout , smooth_data = smooth_data))
+  gc()
+}
+band_data <- function(x, nbreaks = 100, method = c("equal", "quantile")) {
+  method <- match.arg(method)
+  
+  min_val <- min(x, na.rm = TRUE)
+  max_val <- max(x, na.rm = TRUE)
+
+  x <- pmin(pmax(x, min_val), max_val)
+  
+  if (method == "equal") {
+    breaks <- seq(min_val, max_val, length.out = nbreaks + 1)
+  } else if (method == "quantile") {
+    breaks <- unique(quantile(x, probs = seq(0, 1, length.out = nbreaks + 1), na.rm = TRUE))
+  }
+  
+  if (is.integer(x)) {
+    breaks <- round(breaks)
+    breaks <- unique(breaks) 
+  }
+  
+  labels <- paste0("(", formatC(head(breaks, -1), format = "f", digits = 3), ",", formatC(tail(breaks, -1), format = "f", digits = 3), "]")
+  
+  return(cut(x, breaks = breaks, labels = labels, include.lowest = TRUE))
+  gc()
 }
 
+create_EDA_agg <- function(ft= 1,
+                           y = 1,
+                           weight =1 , 
+                           interaction= 1, 
+                           ft_nbreaks = 30, 
+                           interaction_nbreaks = 30,
+                           ft_band_type = "equal",
+                           interaction_band_type = "quantile"){
+  
+  
+  gc()
+  ft <- if (is.numeric(ft)) {
+    band_data(x = ft, nbreaks = ft_nbreaks, method = ft_band_type)
+  } else {
+    ft
+  }
+ 
+  
+  interaction <- if (is.numeric(interaction)) {
+    band_data(x = interaction, nbreaks = interaction_nbreaks, method = interaction_band_type)
+  } else {
+    interaction
+  }
+  
+  tot_weight <- sum(weight)
+  return(data.table(ft = ft, interaction = interaction, y = y, weight = weight) %>%
+    group_by(ft, interaction) %>%
+    summarise(y = sum(y) / sum(weight), weight = sum(weight) / tot_weight) %>%
+    ungroup())
+  gc()
+  
+}
 
-model_spec <-list(ad_f_b = list(exposure = 'freqexposure_adbclaim',
-                                response = 'freqmodels_adbclaim',
-                                objective = 'count:poisson',
-                                eval_metric='poisson-nloglik',
-                                fam = poisson()),
-                  ad_s_b = list(exposure = 'sevexposure_adbclaim',
-                                response = 'sevmodels_adbclaim',
-                                objective = 'reg:gamma',
-                                eval_metric='gamma-nloglik',
-                                fam = Gamma(link = "log")),
-                  ad_f_c = list(exposure = 'freqexposure_adcclaim',
-                                response = 'freqmodels_adcclaim',
-                                objective = 'count:poisson',
-                                eval_metric='poisson-nloglik',
-                                fam = poisson()),
-                  ad_s_c = list(exposure = 'sevexposure_adcclaim',
-                                response = 'sevmodels_adcclaim',
-                                objective = 'reg:gamma',
-                                eval_metric='gamma-nloglik',
-                                fam = Gamma(link = "log")),
-                  eow_f_b = list(exposure = 'freqexposure_eowbclaim',
-                                 response = 'freqmodels_eowbclaim',
-                                 objective = 'count:poisson',
-                                 eval_metric='poisson-nloglik',
-                                 fam = poisson()),
-                  eow_s_b = list(exposure = 'sevexposure_eowbclaim',
-                                 response = 'sevmodels_eowbclaim',
-                                 objective = 'reg:gamma',
-                                 eval_metric='gamma-nloglik',
-                                 fam = Gamma(link = "log")),
-                  eow_f_c = list(exposure = 'freqexposure_eowcclaim',
-                                 response = 'freqmodels_eowcclaim',
-                                 objective = 'count:poisson',
-                                 eval_metric='poisson-nloglik',
-                                 fam = poisson()),
-                  eow_s_c = list(exposure = 'sevexposure_eowcclaim',
-                                 response = 'sevmodels_eowcclaim',
-                                 objective = 'reg:gamma',
-                                 eval_metric='gamma-nloglik',
-                                 fam = Gamma(link = "log")),
-                  flood_f_b = list(exposure = 'freqexposure_floodbclaim',
-                                   response = 'freqmodels_floodbclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik',
-                                   fam = poisson()),
-                  flood_s_b = list(exposure = 'sevexposure_floodbclaim',
-                                   response = 'sevmodels_floodbclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik',
-                                   fam = Gamma(link = "log")),
-                  flood_f_c = list(exposure = 'freqexposure_floodcclaim',
-                                   response = 'freqmodels_floodcclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik',
-                                   fam = poisson()),
-                  flood_s_c = list(exposure = 'sevexposure_floodcclaim',
-                                   response = 'sevmodels_floodcclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik',
-                                   fam = Gamma(link = "log")),
-                  storm_f_b = list(exposure = 'freqexposure_stormbclaim',
-                                   response = 'freqmodels_stormbclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik',
-                                   fam = poisson()),
-                  storm_s_b = list(exposure = 'sevexposure_stormbclaim',
-                                   response = 'sevmodels_stormbclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik',
-                                   fam = Gamma(link = "log")),
-                  storm_f_c = list(exposure = 'freqexposure_stormcclaim',
-                                   response = 'freqmodels_stormcclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik',
-                                   fam = poisson()),
-                  storm_s_c = list(exposure = 'sevexposure_stormcclaim',
-                                   response = 'sevmodels_stormcclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik',
-                                   fam = Gamma(link = "log")),
-                  theft_f_b = list(exposure = 'freqexposure_theftbclaim',
-                                   response = 'freqmodels_theftbclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik',
-                                   fam = poisson()),
-                  theft_s_b = list(exposure = 'sevexposure_theftbclaim',
-                                   response = 'sevmodels_theftbclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik',
-                                   fam = Gamma(link = "log")),
-                  theft_f_c = list(exposure = 'freqexposure_theftcclaim',
-                                   response = 'freqmodels_theftcclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik',
-                                   fam = poisson()),
-                  theft_s_c = list(exposure = 'sevexposure_theftcclaim',
-                                   response = 'sevmodels_theftcclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik',
-                                   fam = Gamma(link = "log")),
-                  fire_f_b = list(exposure = 'freqexposure_firebclaim',
-                                  response = 'freqmodels_firebclaim',
-                                  objective = 'count:poisson',
-                                  eval_metric='poisson-nloglik',
-                                  fam = poisson()),
-                  fire_s_b = list(exposure = 'sevexposure_firebclaim',
-                                  response = 'sevmodels_firebclaim',
-                                  objective = 'reg:gamma',
-                                  eval_metric='gamma-nloglik',
-                                  fam = Gamma(link = "log")),
-                  fire_f_c = list(exposure = 'freqexposure_firecclaim',
-                                  response = 'freqmodels_firecclaim',
-                                  objective = 'count:poisson',
-                                  eval_metric='poisson-nloglik',
-                                  fam = poisson()),
-                  fire_s_c = list(exposure = 'sevexposure_firecclaim',
-                                  response = 'sevmodels_firecclaim',
-                                  objective = 'reg:gamma',
-                                  eval_metric='gamma-nloglik',
-                                  fam = Gamma(link = "log")),
-                  other_f_b = list(exposure = 'freqexposure_otherbclaim',
-                                   response = 'freqmodels_otherbclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik',
-                                   fam = poisson()),
-                  other_s_b = list(exposure = 'sevexposure_otherbclaim',
-                                   response = 'sevmodels_otherbclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik',
-                                   fam = Gamma(link = "log")),
-                  other_f_c = list(exposure = 'freqexposure_othercclaim',
-                                   response = 'freqmodels_othercclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik',
-                                   fam = poisson()),
-                  other_s_c = list(exposure = 'sevexposure_othercclaim',
-                                   response = 'sevmodels_othercclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik',
-                                   fam = Gamma(link = "log")),
-                  subs_f_b = list(exposure = 'freqexposure_subsbclaim',
-                                  response = 'freqmodels_subsbclaim',
-                                  objective = 'count:poisson',
-                                  eval_metric='poisson-nloglik',
-                                  fam = poisson()),
-                  subs_s_b = list(exposure = 'sevexposure_subsbclaim',
-                                  response = 'sevmodels_subsbclaim',
-                                  objective = 'reg:gamma',
-                                  eval_metric='gamma-nloglik',
-                                  fam = Gamma(link = "log")),
-                  unsp_f_pp = list(exposure = 'freqexposure_unspecifiedppcclaim',
-                                   response = 'freqmodels_unspecifiedppcclaim',
-                                   objective = 'count:poisson',
-                                   eval_metric='poisson-nloglik',
-                                   fam = poisson()),
-                  unsp_s_pp = list(exposure = 'sevexposure_unspecifiedppcclaim',
-                                   response = 'sevmodels_unspecifiedppcclaim',
-                                   objective = 'reg:gamma',
-                                   eval_metric='gamma-nloglik',
-                                   fam = Gamma(link = "log")))
+EDA_plot <- function(agg_df,
+                     bar_alpha = 0.5,
+                     lwd = 1,
+                     point_size = 2.5,
+                     line_alpha = 1,
+                     point_alpha = 1,
+                     ft_name = "x",
+                     interaction_name= "y",
+                     smooth_strength =0.7) {
+  
+  gc()
+  # browser()
+  suppressMessages(
+  p <- ggplot(agg_df, aes(x = ft, group = interaction, fill = interaction , weight = weight)) +
+    theme_light(base_size = 15) +
+    geom_bar(aes(y = weight / mean(agg_df$weight)*(sum(agg_df$y*agg_df$weight)/10)), stat = "identity", alpha = bar_alpha) +
+    geom_line(aes(y = y, color = interaction), lwd = lwd, alpha =  line_alpha ) +
+    geom_point(aes(y = y,color = interaction), size = point_size, alpha = point_alpha, shape = 4) +
+    scale_y_continuous(name = "", sec.axis = sec_axis(~ . * mean(agg_df$weight), name = "weight")) +
+    theme(axis.text.x = element_text(angle = 40, vjust = 1, hjust = 0.9))+
+    labs(fill = interaction_name,
+         color = interaction_name,
+         x = ft_name) )
+  
+  if(smooth_strength >0){
+    p<-p+geom_smooth( aes(y = y, color = interaction), method = "loess", span = smooth_strength, se = FALSE)
+  }
+  
+  
+  
+  gc()
+  p
+}
+
+custom_round <- function(x, digits = 2) {
+  if (abs(x) < 1) {
+    return(signif(x, digits))
+  } else {
+    return(round(x , digits))
+  }
+}
