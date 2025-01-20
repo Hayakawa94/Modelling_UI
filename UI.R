@@ -41,32 +41,81 @@ ui <- fluidPage(useShinyjs(),
   
   # Global inputs with background effect and horizontal alignment
   div(class = "global-inputs",
-      div(selectInput("model", "Select Model", choices = names(model_spec))),
-      div(checkboxInput("Distribute_Computation", "Distribute Computation", value = TRUE))
+      div(selectInput("model", "Select Model", choices = names(model_spec) , selected = selected_model)),
+      div(checkboxInput("Distribute_Computation", "Distribute Computation", value = TRUE)),
+      div(sliderInput("n_core", "n core", min = 1,max = detectCores(),value = max(floor(parallel::detectCores()*2/3),1),step = 1))
   ),
   
   tabsetPanel(
-    tabPanel("Feature Spec",
+    tabPanel("Feature Summary",
              sidebarLayout(
                sidebarPanel(
                  textInput("file_name_feature", "File Name", value = "feature_spec"),
                  actionButton("load_feature", "Load Feature Spec", class = "full-width-btn"),
                  actionButton("save_feature", "Save Feature Spec", class = "full-width-btn"),
-                 tags$hr(),
-                 actionButton("reset_table", "Reset Table", class = "full-width-btn"),
-                 actionButton("select_all", "Select all features", class = "full-width-btn"),
-                 tags$hr(),
-                 actionButton("EDA", "EDA", class = "full-width-btn"),
-                 tags$hr()
+                 actionButton("reset_ft_selection", "reset feature selection", class = "full-width-btn")
                ),
                mainPanel(
-                 textOutput("action_message_feature"),
+                 # div(class = "tune-btn-container",
+                 #     actionButton("summarise_data", "summarise_data", class = "full-width-btn red-btn")
+                 # ),
                  tabsetPanel(
                    tabPanel("Feature_Selection", rHandsontableOutput("ft_table")),
-                   tabPanel("Data", DT::dataTableOutput("EDA_data")),
+                   tabPanel("Data", DT::dataTableOutput("dt_sum")),
                    tabPanel("Claim", DT::dataTableOutput("Claim")),
                    tabPanel("Correlation" , uiOutput("corr_topn_slider"),plotlyOutput("corr_plot", width = "1000", height = "1000") )
                  )
+               )
+             )
+    ),
+    tabPanel("EDA",
+             sidebarLayout(
+               sidebarPanel(
+                 selectInput("eda_ft", "Feature (ft):", choices = c("none"), selected = "none"),
+                 selectInput("eda_interaction", "Interaction:", choices = c("none"), selected = "none"),
+                 tags$hr(),
+                 sliderInput("ft_nbreaks", "Feature Breaks:", min = 5, max = 100, value = 30, step = 1),
+                 sliderInput("interaction_nbreaks", "Interaction Breaks:", min = 2, max = 100, value = 30, step = 1),
+                 tags$hr(),
+                 selectInput("ft_band_type", "Feature Band Type:", choices = c("equal", "quantile"), selected = "equal"),
+                 selectInput("interaction_band_type", "Interaction Band Type:", choices = c("equal", "quantile"), selected = "quantile"),
+                 tags$hr(),
+                 
+                
+                 selectInput("filter1", "Filter 1:", choices = c("none"), selected = "none"),
+                 uiOutput("filter1_ui"),
+                 actionButton("select_all_filter1", "Select All Filter 1"),
+                 actionButton("clear_filter1", "Clear Filter 1"),
+                 selectInput("filter2", "Filter 2:", choices = c("none"), selected = "none"),
+                 uiOutput("filter2_ui"),
+                 actionButton("select_all_filter2", "Select All Filter 2"),
+                 actionButton("clear_filter2", "Clear Filter 2"),
+                 selectInput("filter3", "Filter 3:", choices = c("none") , selected = "none"),
+                 uiOutput("filter3_ui"),
+                 actionButton("select_all_filter3", "Select All Filter 3"),
+                 actionButton("clear_filter3", "Clear Filter 3")
+                 
+                 
+    
+ 
+               ),
+               mainPanel( 
+                 div(class = "tune-btn-container",
+                     actionButton("refresh_eda", "refresh chart", class = "full-width-btn red-btn")
+                 ),
+                 fluidRow(
+                 column(2, sliderInput("bar_alpha", "Bar Alpha:", min = 0, max = 1, value = 0.1, step = 0.1)),
+                 column(2, sliderInput("lwd", "Line Width:", min = 0.5, max = 5, value = 0.65, step = 0.01)),
+                 column(2, sliderInput("point_size", "Point Size:", min = 0.5, max = 5, value = 1.5, step = 0.01)),
+                 column(2, sliderInput("line_alpha", "Line Alpha:", min = 0, max = 1, value = 0.6, step = 0.1)),
+                 column(2, sliderInput("point_alpha", "Point Alpha:", min = 0, max = 1, value = 1, step = 0.1))
+                 
+               ),
+               fluidRow(
+                 column(2, checkboxInput("eda_fit_loess", "fit loess", value = TRUE)),
+                 column(2, sliderInput("eda_smooth_strength", "smooth strength:", min = 0, max = 1, value = 1, step = 0.1))
+               ),
+               plotlyOutput("edaPlot", height = "800px")
                )
              )
     ),
@@ -156,8 +205,8 @@ ui <- fluidPage(useShinyjs(),
                  # actionButton("save_Training", "Save Training"),
                  textInput("file_name_Training", "File Name", value = "Training"),
                  tags$hr(),
-                 actionButton("load_tuning_result", "Load Tuned HPs"),
-                 textInput("file_name_tuned", "File Name", value = "tuning"),
+                 actionButton("load_tuning_best_param", "Load Tuned HPs"),
+                 # textInput("file_name_tuned", "File Name", value = "tuning"),
                  tags$hr(),
                  actionButton("train_Sampling", "Sampling", class = "full-width-btn"),
                  conditionalPanel(
@@ -233,9 +282,9 @@ ui <- fluidPage(useShinyjs(),
     tabPanel("Explain",
              sidebarLayout(
                sidebarPanel(
-                 actionButton("load_trained_model", "Load model"),
+                 # actionButton("load_trained_model", "Load model"),
                  # textInput("file_name_SHAP", "File Name", value = "Training"),
-                 tags$hr(),
+                 # tags$hr(),
                  sliderInput("SHAP_sample_size", "Sample Size", min = 0.001, max = 1, value = 1, step = .0001),
                  sliderInput("SHAP_smooth_strength", "Smooth Strength", min = 0, max = 1, value = 0.9, step = .001),
                  sliderInput("SHAP_pt_size", "Point Size", min = 0, max = 4, value = 1, step = .0001),
@@ -283,7 +332,10 @@ ui <- fluidPage(useShinyjs(),
                  selectInput("ft", "Select Feature", choices = sort(fts)),
                  hidden(selectInput("factor_consistency", "Select Interaction:", choices = fts)) ,
                  checkboxGroupInput("undo_shapes", "Select Spline Undo", choices = NULL),
-                 actionButton("undo", "Undo")
+                 actionButton("undo", "Undo"),
+                 tags$hr(),
+                 checkboxInput("band_ft", "band feature" , value = T),
+                 sliderInput("overlay_nbreaks" , "nbreaks",min = 4,max = 100, value = 10,step = 1)
 
                ),
                mainPanel(
@@ -310,7 +362,7 @@ ui <- fluidPage(useShinyjs(),
                           )
                    ),
                    column(4,  # Adjust the width as needed
-                          actionButton("Load_base_model", "Load AvE"),
+                          actionButton("Load_ave", "Load AvE"),
                           sliderInput("samplesize", "Sample Size:", value = 1, min = 0.01, max = 1),
                           checkboxInput("rebase", "Rebase:", value = TRUE),
                           selectInput("filter_feature", "Select Feature to Filter:", choices = NULL),
