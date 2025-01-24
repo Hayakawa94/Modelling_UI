@@ -251,8 +251,8 @@ train_model <- function(fts,
     
     return(list(imp_plot = list(imp_gain   = train_result$imp_plot,
                                 imp_shap = explain_result$ft_importance_plot,
-                                imp_comparison =    KT_plot_compare_ft_imp(train_result$imp_plot$data$Feature,
-                                                                           explain_result$ft_importance_plot$data$variable) +
+                                imp_comparison =    KT_plot_compare_ft_imp(train_result$imp_plot$data%>% arrange(Gain) %>% select(Feature) %>% pull,
+                                                                           explain_result$ft_importance_plot$data %>% arrange(pc_contri) %>% select(variable) %>% pull) +
                                   theme(legend.position = "none") +
                                   theme_light(base_size = 18) + ggtitle("gain vs SHAP importance") ,
                                 imp_shap_X = explain_result$ft_importance_X,
@@ -286,14 +286,15 @@ create_splines <- function(df,splines_dt){
 }
 Sys.time() -> t0
 glm_fit <- function(glm_train,splines_dt, response , base , weight ,fam ){
- 
-  overlay_fts_dt<- create_splines(df =glm_train,splines_dt=splines_dt  )
+ # browser()
+  overlay_fts_dt<- create_splines(df =glm_train %>% mutate_all(~ifelse(is.na(.) , -999 , .)),splines_dt=splines_dt  )
   
-  x <- model.matrix(~ . ,  data =overlay_fts_dt )
+  # x <- model.frame(~ . ,  data =overlay_fts_dt  , na.action =  na.pass  )
+  x<- model.matrix(~., data = overlay_fts_dt )
   
   base_ave <- response/ base 
   suppressWarnings({
-  adj_fit <- fastglm(x =x , y =base_ave , weights = base*weight ,family = fam )})
+  adj_fit <- fastglm(x =x , y =base_ave , weights = base*weight ,family = fam  )})
   adj<- predict(adj_fit , newdata = x, type = "response")
   coefficients <- coef(adj_fit)
   
@@ -303,7 +304,7 @@ glm_fit <- function(glm_train,splines_dt, response , base , weight ,fam ){
     estimate = exp(  coefficients)
   )
   print(glue("glm fit total run time {Sys.time() - t0}")) 
-  return(list(adj=adj, model = adj_fit, fit = result, model =adj_fit ))
+  return(list(adj= as.numeric( adj), model = adj_fit, fit = result, model =adj_fit ))
   gc()
   
 }  
@@ -562,9 +563,11 @@ EDA_plot <- function(agg_df,
 }
 
 custom_round <- function(x, digits = 2) {
-  if (abs(x) < 1) {
-    return(signif(x, digits))
-  } else {
-    return(round(x , digits))
-  }
+  sapply(x, function(val) {
+    if (abs(val) < 1) {
+      return(signif(val, digits))
+    } else {
+      return(round(val, digits))
+    }
+  })
 }

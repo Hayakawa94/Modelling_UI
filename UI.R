@@ -134,7 +134,8 @@ ui <- fluidPage(useShinyjs(),
                    sliderInput("Boruta_max_depth", "Max Depth:", min = 1, max = 15, value =  5, step = 1),
                    sliderInput("Boruta_nrounds", "Number of Rounds:", min = 10, max = 2000, value = 100, step = 1)
                  ), 
-                 hidden(actionButton("Update_ft_spec", "Update Feature_spec", class = "full-width-btn")) 
+                 hidden(actionButton("Update_ft_spec", "Update Feature_spec", class = "full-width-btn")) ,
+                 hidden(sliderInput("boruta_top_selected_fts", "Select top n fts",min = 1,max = 100,step = 1 , value = 10)) 
                ),
                mainPanel(
                  div(class = "tune-btn-container",
