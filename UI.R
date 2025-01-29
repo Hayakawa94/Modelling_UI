@@ -336,7 +336,10 @@ ui <- fluidPage(useShinyjs(),
                  actionButton("undo", "Undo"),
                  tags$hr(),
                  checkboxInput("band_ft", "band feature" , value = T),
-                 sliderInput("overlay_nbreaks" , "nbreaks",min = 4,max = 100, value = 10,step = 1)
+                 selectInput("glm_band_method" ,"band_method",   choices = c("equal" , "quantile" ) , selected ="equal" ),
+                 sliderInput("overlay_nbreaks" , "nbreaks",min = 4,max = 100, value = 10,step = 1),
+                 
+                 checkboxInput("ignore_base_pred", "ignore_base_pred" , value = T)
 
                ),
                mainPanel(
@@ -348,8 +351,8 @@ ui <- fluidPage(useShinyjs(),
                           tabsetPanel(
                             tabPanel("GLM fit",
                                      checkboxGroupInput("fit_lines", "",
-                                                        choices = c("CA_base", "CA_challenger", "obs", "CU_unadj_base", "CU_unadj_challenger"),
-                                                        selected = c("CA_challenger", "obs", "CU_unadj_challenger", "CU_unadj_base"),
+                                                        choices = c("CA_base", "CA_challenger", "obs", "CU_base", "CU_challenger" , "CM"),
+                                                        selected = c("CA_challenger", "obs", "CU_challenger", "CM"),
                                                         inline = TRUE
                                      ),
                                      tableOutput("glm_fit"),
@@ -384,7 +387,7 @@ ui <- fluidPage(useShinyjs(),
                                            sliderInput("size_pt", "AVE point size:", value = 1.5, min = 0.001, max = 3.5, step = 0.001),
                                            checkboxInput("y_lim", "Control y lim", value = TRUE),
                                            sliderInput("y_interval", "y axis lim:", value = c(0, 2), min = 0, max = 5, step = 0.0001),
-                                           downloadButton("downloadData", "Download Data")
+                                           downloadButton("overlayfit_download", "Download Data")
                           )
                    )
                  ),

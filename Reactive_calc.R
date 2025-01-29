@@ -287,24 +287,31 @@ create_splines <- function(df,splines_dt){
 Sys.time() -> t0
 glm_fit <- function(glm_train,splines_dt, response , base , weight ,fam ){
  # browser()
-  overlay_fts_dt<- create_splines(df =glm_train %>% mutate_all(~ifelse(is.na(.) , -999 , .)),splines_dt=splines_dt  )
+  overlay_fts_dt<- create_splines(df =glm_train %>% mutate_all(~ifelse(is.na(.) ,KT_calculate_mode(.) , .)),splines_dt=splines_dt  )
   
-  # x <- model.frame(~ . ,  data =overlay_fts_dt  , na.action =  na.pass  )
   x<- model.matrix(~., data = overlay_fts_dt )
   
   base_ave <- response/ base 
   suppressWarnings({
   adj_fit <- fastglm(x =x , y =base_ave , weights = base*weight ,family = fam  )})
   adj<- predict(adj_fit , newdata = x, type = "response")
+  indiv_eff <- list()
+  for (ft in splines_dt$feature %>% unique() ){
+    excl_terms <- names(adj_fit$coefficients)[!grepl(glue("^{ft}") ,  names(adj_fit$coefficients))]
+    temp_model <- adj_fit
+    temp_model$coefficients[excl_terms[excl_terms!="(Intercept)" ] ] <- 0
+    indiv_eff[[ft]] <- predict(temp_model , newdata = x, type = "response")
+  }
   coefficients <- coef(adj_fit)
+  
   
   # Create data table
   result <- data.table(
     id = names(coefficients),
-    estimate = exp(  coefficients)
+    estimate =  coefficients
   )
   print(glue("glm fit total run time {Sys.time() - t0}")) 
-  return(list(adj= as.numeric( adj), model = adj_fit, fit = result, model =adj_fit ))
+  return(list(adj= as.numeric( adj), model = adj_fit, fit = result, model =adj_fit , indiv_eff =indiv_eff ))
   gc()
   
 }  
@@ -316,35 +323,40 @@ normalize_feature <- function(feature, min_val, max_val) {
 
 
 plot_fit = function(ft,actual,pred,challenger, weight,ft_name, rebase = T, point_size = 2, lwd = 0.8, 
-                    fit_lines =  c("CA_base", "CA_challenger", "obs", "CU_unadj_base", "CU_unadj_challenger"),
+                    fit_lines =  c( "CA_challenger", "obs", "CU_challenger" , "CM"),
                     band_ft =T,
-                    nbreaks=20){
+                    band_method = "equal",
+                    nbreaks=20,
+                    indiv_eff ){
   
   # browser()
   if(rebase){
     pred =   pred*(sum(actual)/sum(pred*weight )) # rebase
+    indiv_eff = indiv_eff* (sum(actual)/sum(indiv_eff*weight ))
     challenger =   challenger*(sum(actual)/sum(challenger*weight )) # rebase
   }
   ft <- if (band_ft){
-       band_data(ft,nbreaks = nbreaks)
+       band_data(KT_quantile_clip(ft, 0.001 , 0.999),nbreaks = nbreaks,method = band_method, weight = weight  )
       }else{
         ft
       }
    
-  
-  df = data.frame(ft,actual,pred,challenger,weight )
+  # browser()
+  df = data.frame(ft,actual,pred,challenger,weight ,indiv_pred= indiv_eff )
   df %>% 
-    mutate_at(vars(c("pred", "challenger")) , ~.x*weight) -> df
+    mutate_at(vars(c("pred", "challenger" , "indiv_pred")) , ~.x*weight) -> df
   df  %>% select(-ft) %>%
     summarise_all(list(sum))  %>%
     mutate(actual_overall_avg = actual/weight,
            pred_overall_avg = pred/weight , 
+           indiv_pred_overall_avg = indiv_pred/weight,
            challenger_overall_avg = challenger/weight) ->overall
   df %>%  group_by(ft) %>%
     summarise_all(list(sum)) %>%
     mutate(actual=actual/weight,
            pred=pred/weight,
            challenger=challenger/weight,
+           indiv_pred = indiv_pred/weight,
            ave = actual/pred,
            challenger_ave = actual/challenger,
            actual_overall_avg = overall$actual_overall_avg,
@@ -352,18 +364,21 @@ plot_fit = function(ft,actual,pred,challenger, weight,ft_name, rebase = T, point
            actual_overall_avg = overall$actual_overall_avg
            
     )%>%
-    mutate_at(vars(c("pred" , "challenger" , "actual")), ~ .x/actual_overall_avg ) %>%
+    mutate_at(vars(c("pred" , "challenger" , "actual" , "indiv_pred")), ~ .x/actual_overall_avg ) %>%
     mutate(weight = weight/sum(weight)) %>%
-    select(c("ft", "pred" , "challenger" , "actual" , "weight" , "ave" , "challenger_ave" )) %>%
+    select(c("ft", "pred" , "challenger" , "actual" , "weight" , "ave" , "challenger_ave" , "indiv_pred" )) %>%
     rename(CA_base = pred,
            CA_challenger =challenger ,
+           CM = indiv_pred,
            obs = actual , 
-           CU_unadj_base = ave,
-           CU_unadj_challenger = challenger_ave) %>% 
+           CU_base = ave,
+           CU_challenger = challenger_ave) %>% 
+    mutate(CU_base = CU_base*CM,
+           CU_challenger=CU_challenger*CM)%>% 
     melt(id.var = c("ft" ) ) %>% as.data.table -> ave_df  
   ave_df %>% filter(variable!= "weight") %>%
     filter(variable %in% fit_lines) %>% 
-    ggplot(.,aes(x = ft , y = value , group = variable , color = variable , shape = variable))+
+    ggplot(.,aes(x = ft , y = value , group = variable , color = variable , shape = variable))+ 
     geom_bar(data =  ave_df[variable == "weight"],
              aes( y=   ave_df[variable == "weight"]$value/max(ave_df[variable == "weight"]$value)),
              stat="identity", size=.1, alpha=1 , position = "dodge", color = "yellow", fill = "yellow")+
@@ -373,13 +388,15 @@ plot_fit = function(ft,actual,pred,challenger, weight,ft_name, rebase = T, point
     scale_color_manual(values = c("CA_base" = "darkgreen",
                                   "CA_challenger"="darkgreen",
                                   "obs" = '#da14ff',
-                                  "CU_unadj_base" ="orange",
-                                  "CU_unadj_challenger" = "orange")) +
+                                  "CU_base" ="orange",
+                                  "CU_challenger" = "orange",
+                                  "CM" = "green")) +
     scale_shape_manual(values = c("CA_base" = 16,
                                   "CA_challenger"=3,
                                   "obs" = 16,
-                                  "CU_unadj_base" =16,
-                                  "CU_unadj_challenger" = 3))+
+                                  "CU_base" =16,
+                                  "CU_challenger" = 3,
+                                  "CM" = 1))+
     xlab(ft_name)+
     theme(axis.text.x = element_text(angle = 40, vjust = 1, hjust=0.9))+
     
@@ -391,12 +408,14 @@ plot_fit = function(ft,actual,pred,challenger, weight,ft_name, rebase = T, point
 
 
 # Define your function here
-calc_ave <- function(ft, actual, pred, weight, challenger, factor_consistency,ft_name, rebase = FALSE , band_ft = T,nbreaks=20 ) {
+calc_ave <- function(ft, actual, pred, weight, challenger, factor_consistency,ft_name, rebase = FALSE , band_ft = T,nbreaks=20,band_method = "equal" ) {
   # Convert to data.table
   gc()
   
   ft <- if (band_ft){
-    band_data(ft,nbreaks = nbreaks)
+    
+    band_data(KT_quantile_clip(ft, 0.001 , 0.999),nbreaks = nbreaks,method = band_method, weight = weight  )
+    # band_data(ft,nbreaks = nbreaks)
   }else{
     ft
   }
@@ -419,7 +438,7 @@ calc_ave <- function(ft, actual, pred, weight, challenger, factor_consistency,ft
   ave_df <- df[, .(pred = sum(pred), actual = sum(actual), weight = sum(weight)), by = .(ft, factor_consistency)]
   ave_df[, `:=`(pred = pred / weight, actual = actual / weight, ave = actual / pred)]
   ave_df <- ave_df[, .(ft, pred, actual, weight, weight_norm = weight / sum(weight), ave, sample = factor_consistency)]
-  ave_df$ft = factor(ave_df$ft , levels = KT_dym_sort(unique(ave_df$ft)))
+  # ave_df$ft = factor(ave_df$ft , levels = KT_dym_sort(unique(ave_df$ft)))
   scale <- max(ave_df$weight_norm)
   p <- ggplot(ave_df, aes(x = ft, group = sample, fill = sample, color = sample, weight = weight)) +
     theme_light() +
@@ -470,24 +489,29 @@ cosmetic_changes <- function(p, alpha_pt=1,alpha_line=0.5, size_pt =2, size_line
   return(list(ave_plot = pout , smooth_data = smooth_data))
   gc()
 }
-band_data <- function(x, nbreaks = 100, method = c("equal", "quantile")) {
+band_data <- function(x, weight = 1, nbreaks = 100, method = c("equal", "quantile")) {
   method <- match.arg(method)
   
   min_val <- min(x, na.rm = TRUE)
   max_val <- max(x, na.rm = TRUE)
-
+  
   x <- pmin(pmax(x, min_val), max_val)
   
   if (method == "equal") {
     breaks <- seq(min_val, max_val, length.out = nbreaks + 1)
   } else if (method == "quantile") {
-    breaks <- unique(quantile(x, probs = seq(0, 1, length.out = nbreaks + 1), na.rm = TRUE))
+    # Use exposure to calculate quantiles
+    breaks <- unique(quantile(x, probs = seq(0, 1, length.out = nbreaks + 1), na.rm = TRUE, weights = weight))
   }
   
   if (is.integer(x)) {
     breaks <- round(breaks)
     breaks <- unique(breaks) 
   }
+  
+  # Ensure the first and last breaks are min_val and max_val respectively
+  breaks[1] <- min_val
+  breaks[length(breaks)] <- max_val
   
   labels <- paste0("(", formatC(head(breaks, -1), format = "f", digits = 3), ",", formatC(tail(breaks, -1), format = "f", digits = 3), "]")
   
@@ -507,7 +531,7 @@ create_EDA_agg <- function(ft= 1,
   
   gc()
   ft <- if (is.numeric(ft)) {
-    band_data(x = ft, nbreaks = ft_nbreaks, method = ft_band_type)
+    band_data(x = ft, nbreaks = ft_nbreaks, method = ft_band_type )
   } else {
     ft
   }

@@ -20,7 +20,7 @@ source("H:/Restricted Share/DA P&U/Tech Modelling/Users/Khoa/RPMtools/RPMtools.R
 
 library(parallel)
 
-exp <- "new_model_test"
+exp <- "panel_prem_model"
 
 base_path <- "H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelling_ui"
 
@@ -30,7 +30,7 @@ if ( !file.exists(exp_path)){
   dir.create(exp_path)
 }
 # # specify modelling data 
-train <- fread("C:\\Users\\Khoa.Truong\\Work\\P2_ui_DATA\\H2_modelling_num_fts.csv")
+train <- fread("H:\\Restricted Share\\DA P&U\\Tech Modelling\\01 Home\\Phase 2\\15 R&D\\Modelling_ui\\panel_prem_modelling_data.csv")
 train[train$ay_unbanded < 2023] -> train
 
 

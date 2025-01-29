@@ -1056,9 +1056,9 @@ server <- function(input, output, session) {
     shap_values(model_output$shap_values)
     
     ft_imp <- model_output$imp_plot$imp_shap$data$variable
-    updateSelectInput(session, "SHAP_ft", choices = sort( ft_imp))
-    updateSelectInput(session, "SHAP_X_ft1", choices = sort( ft_imp))
-    updateSelectInput(session, "SHAP_X_ft2", choices = sort( ft_imp))
+    updateSelectInput(session, "SHAP_ft", choices = ( ft_imp))
+    updateSelectInput(session, "SHAP_X_ft1", choices = ( ft_imp))
+    updateSelectInput(session, "SHAP_X_ft2", choices = ( ft_imp))
     output$Shap_value_loaded <- renderText("Shap_Value loaded.")
     
     
@@ -1072,12 +1072,18 @@ server <- function(input, output, session) {
     base_model()
     
   }, {
-    req(base_model())
+    # browser()
+    if(input$ignore_base_pred == T){
+      base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+    }else{
+      req(base_model())
+      base_pred <-  base_model()$model_output$pred
+    }
     fam = model_spec[[input$model]]$fam
     splines_dt <- do.call(rbind, drawn_shapes())
     glm_train <- train[train[[config()$weight]]>0] %>% select(unique(splines_dt$feature))
     if (nrow(splines_dt) > 0 && !is.null(splines_dt)) {
-      glm_fit(glm_train, splines_dt, config()$train_y, base_model()$model_output$pred, config()$train_weight, fam)
+      glm_fit(glm_train, splines_dt, config()$train_y,base_pred, config()$train_weight, fam)
     } else {
       return(NULL)
     }
@@ -1086,17 +1092,35 @@ server <- function(input, output, session) {
   fit_plot <- reactive({
     
     # browser()
-    req(input$load_Training||input$train )
-    req(base_model())
-    challenger <- if (is.null(overlays())) {
-      base_model()$model_output$pred
-    } else {
-      base_model()$model_output$pred * overlays()$adj
+    
+    # req(base_model())
+    
+    if(input$ignore_base_pred== T){
+      base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+    }else{
+      req(input$load_Training||input$train )
+      req(base_model())
+      base_pred <-  base_model()$model_output$pred
     }
+    
+    if (is.null(overlays())) {
+      challenger = base_pred
+      indiv_eff = 1
+    } else {
+      challenger = base_pred * overlays()$adj
+      indiv_eff = if (input$ft %in% names(overlays()$indiv_eff )) {
+        overlays()$indiv_eff[[input$ft]]
+      } else {
+        1
+      }
+    }
+    
+    
+    
     plot_fit(
       ft = train[train[[config()$weight]]>0][[input$ft]],
       actual =config()$train_y * config()$train_weight,
-      pred = base_model()$model_output$pred,
+      pred = base_pred,
       challenger = challenger,
       weight = config()$train_weight,
       rebase = TRUE,
@@ -1105,7 +1129,9 @@ server <- function(input, output, session) {
       fit_lines = input$fit_lines,
       ft_name= input$ft,
       band_ft = input$band_ft,
-      nbreaks = input$overlay_nbreaks
+      nbreaks = input$overlay_nbreaks,
+      indiv_eff = indiv_eff,
+      band_method = input$glm_band_method
       
     )
   })
@@ -1262,7 +1288,7 @@ server <- function(input, output, session) {
     updateCheckboxGroupInput(session, "undo_shapes", choices = NULL)
   })
   
-  output$export <- downloadHandler(
+  output$overlayfit_download <- downloadHandler(
     filename = function() {
       paste("drawn_shapes", Sys.Date(), ".csv", sep = "")
     },
@@ -1274,8 +1300,16 @@ server <- function(input, output, session) {
   )
   
   observeEvent(input$save_glm, {
-    req(drawn_shapes(),overlays(), base_model())
-    saveRDS(list(drawn_shapes = drawn_shapes(), undo_shapes = input$undo_shapes, pred =  base_model()$model_output$pred * overlays()$adj), file = paste0(input$glm_overlay_out, ".rds"))
+    req(drawn_shapes(),overlays())
+    if(input$ignore_base_pred== T){
+      base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+    }else{
+      req(base_model())
+      base_pred <-  base_model()$model_output$pred
+    }
+    
+    
+    saveRDS(list(drawn_shapes = drawn_shapes(), undo_shapes = input$undo_shapes, pred =  base_pred* overlays()$adj, glm_model_out = overlays()), file = paste0(input$glm_overlay_out, ".rds"))
   })
   
   observeEvent(input$load_glm, {
@@ -1297,37 +1331,48 @@ server <- function(input, output, session) {
     # updateSelectInput(session, "model", choices = sort(names(model_spec)))
     updateSelectInput(session, "ft", choices =  glm_ft_list())
     updateSelectInput(session, "factor_consistency", choices = c("none", "rnd_factor", fts))
-    updateSelectInput(session, "filter_feature", choices = fts)
-    updateSelectInput(session, "secondary_filter_feature", choices = fts)
-    updateSelectInput(session, "tertiary_filter_feature", choices = fts)
+    updateSelectInput(session, "filter_feature", choices =  c("none",fts))
+    updateSelectInput(session, "secondary_filter_feature", choices = c("none",fts))
+    updateSelectInput(session, "tertiary_filter_feature", choices =c("none",fts))
   })
   
   glm_ft_list <- reactive( {
-    req(file.exists(glue("{input$file_name_Training}.rds")))
-    req(base_model() )
     
-    gbm_fts <-base_model()$model_output$model$feature_names
-    
-    
-    
-    
-    lapply(fts, function(x) 
-      if(x %in% gbm_fts){paste(x , "(xgb fitted)" , " ")
-      } else{x} )  %>% unlist() -> lab
-    
-    return(lapply(fts, function(x) x) %>% setNames(.,lab) )
-    
+    if(input$ignore_base_pred==T){
+      return(fts)
+    }else{
+      req(file.exists(glue("{input$file_name_Training}.rds")))
+      req(base_model() )
+      
+      gbm_fts <-base_model()$model_output$model$feature_names
+      
+      
+      
+      
+      lapply(fts, function(x) 
+        if(x %in% gbm_fts){paste(x , "(xgb fitted)" , " ")
+        } else{x} )  %>% unlist() -> lab
+      
+      return(lapply(fts, function(x) x) %>% setNames(.,lab) )
+    }
   })
   
   
   sampling <- reactive( {
     set.seed(1)
     
-    challenger <- if (is.null(overlays())) {
-      base_model()$model_output$pred
-    } else {
-      base_model()$model_output$pred * overlays()$adj
+    if(input$ignore_base_pred== T){
+      base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+    }else{
+      base_pred <-  base_model()$model_output$pred
     }
+    
+    challenger <- if (is.null(overlays())) {
+      base_pred
+    } else {
+      base_pred * overlays()$adj
+    }
+    
     df_sample = train[train[[config()$weight]] > 0 ] %>% 
       select(fts,c(config()$weight, config()$response )) %>%
       mutate(pred =  challenger,
@@ -1434,7 +1479,8 @@ server <- function(input, output, session) {
                               rebase = input$rebase,
                               ft_name= input$ft,
                               band_ft = input$band_ft,
-                              nbreaks=input$overlay_nbreaks ))
+                              nbreaks=input$overlay_nbreaks,
+                              band_method = input$glm_band_method))
   })
   
   cosmetic <- reactive({
