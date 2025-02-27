@@ -62,7 +62,7 @@ ui <- fluidPage(useShinyjs(),
                  tabsetPanel(
                    tabPanel("Feature_Selection", rHandsontableOutput("ft_table")),
                    tabPanel("Data", DT::dataTableOutput("dt_sum")),
-                   tabPanel("Claim", DT::dataTableOutput("Claim")),
+                   tabPanel("Response", DT::dataTableOutput("Claim")),
                    tabPanel("Correlation" , uiOutput("corr_topn_slider"),plotlyOutput("corr_plot", width = "1000", height = "1000") )
                  )
                )
@@ -339,7 +339,8 @@ ui <- fluidPage(useShinyjs(),
                  selectInput("glm_band_method" ,"band_method",   choices = c("equal" , "quantile" ) , selected ="equal" ),
                  sliderInput("overlay_nbreaks" , "nbreaks",min = 4,max = 100, value = 10,step = 1),
                  
-                 checkboxInput("ignore_base_pred", "ignore_base_pred" , value = T)
+                 checkboxInput("ignore_base_pred", "ignore_base_pred" , value = T),
+                 actionButton("lookup_pmml_export", "Export_lookup_table")
 
                ),
                mainPanel(

@@ -6,8 +6,10 @@ source("H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelli
 
 
 server <- function(input, output, session) {
+  # browser()
   initial_data <- data.frame(
     Features = fts,
+    dtype = lapply(fts, function(x) class(train[[x]]))  %>% as.character(),
     Use_Feature = rep(FALSE, length(fts)),
     Monotonicity = rep(0, length(fts)),
     Interaction_Constraints = rep(FALSE, length(fts)),
@@ -896,7 +898,11 @@ server <- function(input, output, session) {
       updateSliderInput(session, "train_gamma", value = loaded_state$train_gamma)
       updateSliderInput(session, "use_early_stopping_rounds", value = loaded_state$train_use_early_stopping_rounds)
       updateSliderInput(session, "tree_index", max = loaded_state$model_output$model$niter -1)
-      table_data(loaded_state$ft_spec)
+      # browser()
+      table_data(initial_data %>% select(Features ,dtype  ) %>% 
+                   left_join(loaded_state$ft_spec %>% select(Features ,Use_Feature,Monotonicity , Interaction_Constraints ) ,by = "Features") %>% 
+                   mutate(Monotonicity = ifelse(is.na(Monotonicity ) , 0 , Monotonicity ) ) %>%
+                   mutate_at(vars(Use_Feature , Interaction_Constraints), ~ ifelse(is.na(.x)  , F , .x) ))
       # Trigger the rendering of plots
       output$Gain_imp_plot <- renderPlotly({
         ggplotly(loaded_state$model_output$imp_plot$imp_gain + theme_light()) %>% layout(height = 1000)
@@ -1115,7 +1121,23 @@ server <- function(input, output, session) {
       }
     }
     
-    
+    observe({
+      
+      data = train[train[[config()$weight]]>0][[input$ft]]
+      unique_values <- length(unique(data))
+      if (unique_values <=5) {
+        updateCheckboxInput(session, "band_ft", value = FALSE)
+        hide("band_ft")
+        hide("glm_band_method")
+        hide("overlay_nbreaks")
+      } else {
+        
+        show("band_ft")
+        # updateCheckboxInput(session, "band_ft", value = T)
+        show("glm_band_method")
+        show("overlay_nbreaks")
+      }
+    })
     
     plot_fit(
       ft = train[train[[config()$weight]]>0][[input$ft]],
@@ -1134,6 +1156,12 @@ server <- function(input, output, session) {
       band_method = input$glm_band_method
       
     )
+  })
+  
+  observeEvent(input$lookup_pmml_export,{
+    req(overlays())
+    print("exporting lookup table in pmml format")
+    KT_Export_tables_to_pmml(overlays()$lookup_tables , input$glm_overlay_out)
   })
   
   output$overlay_plot <- renderPlotly({
@@ -1240,6 +1268,7 @@ server <- function(input, output, session) {
                 mutate(x0_lvl_name  = ifelse(overlap ==F ,  as.numeric( sub("\\(([^,]+),.*", "\\1", lvl_name)) ,  as.numeric( sub(".*,([^,]+)\\]", "\\1", lvl_name) ) )) %>% select(-lvl_name) %>%
                 left_join(lvl_name , by = c(x1 = "idx" , "feature" = "ft") ) %>%
                 mutate(x1_lvl_name  = as.numeric( sub(".*,([^,]+)\\]", "\\1", lvl_name) )) %>% select(-lvl_name) %>%
+                mutate_at(vars(c("x1_lvl_name" , "x0_lvl_name")   ) ,~ ifelse(dtype == "integer" , round(.x)  ,  custom_round(.x,2))  ) %>%
                 mutate(id = glue("{input$ft}_{x0_lvl_name}to{x1_lvl_name}"))
             }else{
               
@@ -1300,7 +1329,9 @@ server <- function(input, output, session) {
   )
   
   observeEvent(input$save_glm, {
+    
     req(drawn_shapes(),overlays())
+    print("Saving GLM")
     if(input$ignore_base_pred== T){
       base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
     }else{
@@ -1310,6 +1341,7 @@ server <- function(input, output, session) {
     
     
     saveRDS(list(drawn_shapes = drawn_shapes(), undo_shapes = input$undo_shapes, pred =  base_pred* overlays()$adj, glm_model_out = overlays()), file = paste0(input$glm_overlay_out, ".rds"))
+    print("Done!")
   })
   
   observeEvent(input$load_glm, {
