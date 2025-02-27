@@ -1330,18 +1330,22 @@ server <- function(input, output, session) {
   
   observeEvent(input$save_glm, {
     
-    req(drawn_shapes(),overlays())
+    req(glm_model_out())
     print("Saving GLM")
+
+    saveRDS(glm_model_out(), file = paste0(input$glm_overlay_out, ".rds"))
+    print("Done!")
+  })
+  
+  glm_model_out<- reactive({
+    req(drawn_shapes(),overlays())
     if(input$ignore_base_pred== T){
       base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
     }else{
       req(base_model())
       base_pred <-  base_model()$model_output$pred
     }
-    
-    
-    saveRDS(list(drawn_shapes = drawn_shapes(), undo_shapes = input$undo_shapes, pred =  base_pred* overlays()$adj, glm_model_out = overlays()), file = paste0(input$glm_overlay_out, ".rds"))
-    print("Done!")
+    list(drawn_shapes = drawn_shapes(), undo_shapes = input$undo_shapes, pred =  base_pred* overlays()$adj, glm_model_out = overlays())
   })
   
   observeEvent(input$load_glm, {
@@ -1559,88 +1563,98 @@ server <- function(input, output, session) {
     
     
     gc()
+    browser()
     print("Calc model performance")
-    if (base_model()$train_kfold == T    ){
-      kfold = base_model()$train_kfold_val
-    }else{
-      kfold = 0
-    }
-    
-    if(base_model()$train_use_early_stopping_rounds== T){
-      early_stopping_rounds = 5
-    }else{
-      early_stopping_rounds = NULL
-    }
-    print("run gbm stability test")
-    
-    train_model(fts = base_model()$model_output$model$feature_names,
-                model = input$model,
-                train = train[train[[config()$weight]] >0 ] %>% select(c(base_model()$model_output$model$feature_names , config()$weight , config()$response)),
-                kfold = kfold,
-                train_validate_ratio = base_model()$train_Ratio,
-                # use_tunred_HP = NULL,
-                eta = base_model()$train_eta,
-                max_depth = base_model()$train_max_depth,
-                min_child_weight = base_model()$train_min_child_weight,
-                subsample = base_model()$train_subsample,
-                colsample_bytree = base_model()$train_colsample_bytree,
-                lambda = base_model()$train_lambda,
-                alpha = base_model()$train_alpha,
-                nrounds = base_model()$train_nrounds,
-                gamma=base_model()$train_gamma,
-                parallel = T,
-                interaction_constraints =base_model()$model_output$model$params$interaction_constraints,
-                monotone_constraints = base_model()$model_output$model$params$monotone_constraints,
-                early_stopping_rounds=early_stopping_rounds,
-                return_pred_only = T,
-                seed = 123
-    ) -> gbm_train_pred_w_diff_seed
-    
-    
-    gbm_model <-  base_model()$model_output$model
-    
-    
-    
-    gbm_train_pred <- base_model()$model_output$pred 
-    
-    pred_diff <- gbm_train_pred_w_diff_seed/gbm_train_pred
-    
-    print("make test predictions")
-    ggplot(data.table(diff=pred_diff),aes(x = diff ))+geom_histogram(bins=100)+ theme_light(base_size = 18) -> stability_hist
-    
-    lapply(seq(0.01,0.5,0.01), function(x) ifelse(abs(pred_diff -1 ) < x ,1,0  )) %>% 
-      setNames(., as.character(seq(0.01,0.5,0.01))) %>% as.data.table() %>% summarise_all( list(mean)) %>% 
-      melt -> stability_test  
-    stability_test %>% rename(threshold = variable) %>% ggplot(.,aes(x = threshold, y= value , group = 1)) + geom_line() + geom_point() +
-      theme_light(base_size = 18)+
-      theme(axis.text.x = element_text(angle = 40, vjust = 1, hjust=0.9)) + ylab("Proportion of trained predictions matched") -> stability_threshold
-    
-    
-    
-    gbm_test_pred <- predict(gbm_model, 
-                             newdata = as.matrix(test[test[[config()$weight]]>0] %>% select(gbm_model$feature_name)) ,
-                             type = "response")
-    
-    
-    
-    
-    
     if (is.null(overlays())) {
       train_overlays_adj <- 1
       test_overlays_adj <- 1
     }else{
       train_overlays_adj <- overlays()$adj
       
-      splines_dt <- do.call(rbind, drawn_shapes())
-      print(splines_dt)
-      overlay_fts_dt <- create_splines(df = test[test[[config()$weight]]>0] %>% select(splines_dt$feature), splines_dt = splines_dt)
-      
-      test_overlays_adj <- predict(overlays()$model,newdata = model.matrix(~ . ,  data =overlay_fts_dt )  , type = "response" )
+      test_overlays_adj <- glm_spline_predict(glm_model_out() ,test[test[[config()$weight]]>0]  )
     }
     
-    train_pred <- gbm_train_pred*train_overlays_adj
-    test_pred <- gbm_test_pred*test_overlays_adj
-    
+    if(input$ignore_base_pred==F){
+      if (base_model()$train_kfold == T    ){
+        kfold = base_model()$train_kfold_val
+      }else{
+        kfold = 0
+      }
+      
+      if(base_model()$train_use_early_stopping_rounds== T){
+        early_stopping_rounds = 5
+      }else{
+        early_stopping_rounds = NULL
+      }
+      print("run gbm stability test")
+      
+      train_model(fts = base_model()$model_output$model$feature_names,
+                  model = input$model,
+                  train = train[train[[config()$weight]] >0 ] %>% select(c(base_model()$model_output$model$feature_names , config()$weight , config()$response)),
+                  kfold = kfold,
+                  train_validate_ratio = base_model()$train_Ratio,
+                  # use_tunred_HP = NULL,
+                  eta = base_model()$train_eta,
+                  max_depth = base_model()$train_max_depth,
+                  min_child_weight = base_model()$train_min_child_weight,
+                  subsample = base_model()$train_subsample,
+                  colsample_bytree = base_model()$train_colsample_bytree,
+                  lambda = base_model()$train_lambda,
+                  alpha = base_model()$train_alpha,
+                  nrounds = base_model()$train_nrounds,
+                  gamma=base_model()$train_gamma,
+                  parallel = T,
+                  interaction_constraints =base_model()$model_output$model$params$interaction_constraints,
+                  monotone_constraints = base_model()$model_output$model$params$monotone_constraints,
+                  early_stopping_rounds=early_stopping_rounds,
+                  return_pred_only = T,
+                  seed = 123
+      ) -> gbm_train_pred_w_diff_seed
+      
+      
+      gbm_model <-  base_model()$model_output$model
+      
+      
+      
+      gbm_train_pred <- base_model()$model_output$pred 
+      
+      pred_diff <- gbm_train_pred_w_diff_seed/gbm_train_pred
+      
+      print("make test predictions")
+      ggplot(data.table(diff=pred_diff),aes(x = diff ))+geom_histogram(bins=100)+ theme_light(base_size = 18) -> stability_hist
+      
+      lapply(seq(0.01,0.5,0.01), function(x) ifelse(abs(pred_diff -1 ) < x ,1,0  )) %>% 
+        setNames(., as.character(seq(0.01,0.5,0.01))) %>% as.data.table() %>% summarise_all( list(mean)) %>% 
+        melt -> stability_test  
+      stability_test %>% rename(threshold = variable) %>% ggplot(.,aes(x = threshold, y= value , group = 1)) + geom_line() + geom_point() +
+        theme_light(base_size = 18)+
+        theme(axis.text.x = element_text(angle = 40, vjust = 1, hjust=0.9)) + ylab("Proportion of trained predictions matched") -> stability_threshold
+      
+      
+      
+      gbm_test_pred <- predict(gbm_model, 
+                               newdata = as.matrix(test[test[[config()$weight]]>0] %>% select(gbm_model$feature_name)) ,
+                               type = "response")
+      
+      
+      
+      
+      
+
+      
+      train_pred <- gbm_train_pred*train_overlays_adj
+      test_pred <- gbm_test_pred*test_overlays_adj
+      
+    }else{
+      train_pred <- train_overlays_adj
+      test_pred <- test_overlays_adj
+      ggplot() + 
+        theme_void() -> stability_threshold
+      ggplot() + 
+        theme_void() -> stability_hist
+      stability_test= data.table(variable = seq(0.01,0.5,0.01) , rep(1, length( seq(0.01,0.5,0.01))) )
+    }
+
     print("calc train performance")
     
     
