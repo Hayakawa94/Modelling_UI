@@ -286,7 +286,7 @@ create_splines <- function(df,splines_dt){
   return(overlay_fts_dt %>% select(-idx))
 }
 Sys.time() -> t0
-glm_fit <- function(glm_train,splines_dt, response , base , weight ,fam , pmml_max_band = 100 ){
+glm_fit <- function(glm_train,splines_dt, response , base , weight ,fam , pmml_max_band = 220 ){
  # browser()
   splines_dt<- splines_dt %>% distinct()
   overlay_fts_dt<- create_splines(df =glm_train %>% mutate_all(~ifelse(is.na(.) ,KT_calculate_mode(.) , .)),splines_dt=splines_dt  )
