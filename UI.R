@@ -351,12 +351,13 @@ ui <- fluidPage(useShinyjs(),
                           ),
                           tabsetPanel(
                             tabPanel("GLM fit",
+                                     tableOutput("glm_fit"),
                                      checkboxGroupInput("fit_lines", "",
                                                         choices = c("CA_base", "CA_challenger", "obs", "CU_base", "CU_challenger" , "CM"),
                                                         selected = c("CA_challenger", "obs", "CU_challenger", "CM"),
                                                         inline = TRUE
                                      ),
-                                     tableOutput("glm_fit"),
+                                     checkboxInput("show_splines", "Show Splines", value = TRUE),
                                      plotlyOutput("overlay_plot"),
                                      plotlyOutput("avePlot")  # Placing avePlot below overlay_plot
                                      

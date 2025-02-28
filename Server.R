@@ -1160,8 +1160,14 @@ server <- function(input, output, session) {
   
   observeEvent(input$lookup_pmml_export,{
     req(overlays())
+    exp_path <- glue("{getwd()}/{input$glm_overlay_out}_GLMpmml") 
+    if ( !file.exists(exp_path)){
+      
+      dir.create(exp_path)
+    }
     print("exporting lookup table in pmml format")
-    KT_Export_tables_to_pmml(overlays()$lookup_tables , input$glm_overlay_out)
+    KT_Export_tables_to_pmml(overlays()$lookup_tables , input$glm_overlay_out , export_path = exp_path)
+    KT_export_to_excel(overlays()$band_logic_for_rdr ,glue("{exp_path}/band_logic_for_rdr.xlsx") )
   })
   
   output$overlay_plot <- renderPlotly({
@@ -1176,9 +1182,7 @@ server <- function(input, output, session) {
     )
     shapes <- drawn_shapes()[[input$ft]]
     
-    if (!is.null(shapes)) {
-      
-      
+    if (!is.null(shapes) && input$show_splines) {
       p <- p %>%
         add_segments(
           data = shapes,
@@ -1563,7 +1567,7 @@ server <- function(input, output, session) {
     
     
     gc()
-    browser()
+    # browser()
     print("Calc model performance")
     if (is.null(overlays())) {
       train_overlays_adj <- 1
