@@ -354,15 +354,19 @@ glm_fit <- function(glm_train,splines_dt, response , base , weight ,fam , pmml_m
           spline =  ifelse(gap ==0 ,list(seq(x0, x1, length.out = band_dist)) ,list(c(seq(x0, x1, length.out = band_dist) , seq(x1, x0lag1 , length.out =2)) %>% unique )),
           spline_norm = list(normalize_feature(spline, min_val = x0, max_val = x1)),
           rel = list( as.vector( spline_norm)[as.vector( spline_norm)>0] * estimate),
+          last_rel =  (rel[[length(rel)]]) , 
           band = list(  create_pairs(spline %>% as.vector() %>% round(3)  ))) %>% ungroup() %>%
         mutate(band = lapply(1:length(band) ,function(x) if(x==1){c(glue("<={spline[[x]][1]}"), band[[x]])  }
                              else if(x==length(band)){c(band[[x]],glue(">{round(spline[[x]]%>% tail(1),3)}") , "default") }
                              else{band[[x]]} ) ,
+               last_rel= cumsum(last_rel),
+               rel =lapply(1:length(rel), function(x) if (x==1){rel[[x]]}else{rel[[x]]+last_rel[x-1] }  ) , 
                rel =lapply(1:length(rel), function(x) if(x ==1 ){c(0,rel[[x]])  }
                            else if(x == length(rel)){c(rel[[x]],rel[[x]] %>% tail(1) , imp_rel)}
                            else{rel[[x]]})    )  -> rel_data
-      lapply(1:nrow(rel_data), function(x)data.table(band= rel_data[x,]$band %>% unlist()  , relativity = rel_data[x,]$rel %>% unlist()  )) %>% rbindlist(.) %>%
-        rename({{x}}:= band)  -> lookup_table
+      lapply(1:nrow(rel_data), function(x)data.table(band=   rel_data[x,]$band %>% unlist()  , relativity = rel_data[x,]$rel %>% unlist()  )) %>% rbindlist(.) %>%
+        mutate(band = factor(band , levels = band ) , relativity = (relativity)) %>%
+        rename({{x}}:= band)   -> lookup_table
       band_logic_for_rdr<-data.frame()
       
     } else{
