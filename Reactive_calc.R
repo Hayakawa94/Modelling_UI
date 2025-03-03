@@ -584,7 +584,7 @@ cosmetic_changes <- function(p, alpha_pt=1,alpha_line=0.5, size_pt =2, size_line
 }
 band_data <- function(x, weight = 1, nbreaks = 100, method = c("equal", "quantile")) {
   method <- match.arg(method)
-  
+  # browser()
   min_val <- min(x, na.rm = TRUE)
   max_val <- max(x, na.rm = TRUE)
   
