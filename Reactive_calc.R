@@ -286,105 +286,179 @@ create_splines <- function(df,splines_dt){
   return(overlay_fts_dt %>% select(-idx))
 }
 Sys.time() -> t0
-glm_fit <- function(glm_train,splines_dt, response , base , weight ,fam , pmml_max_band = 220 ){
- # browser()
-  splines_dt<- splines_dt %>% distinct()
-  overlay_fts_dt<- create_splines(df =glm_train %>% mutate_all(~ifelse(is.na(.) ,KT_calculate_mode(.) , .)),splines_dt=splines_dt  )
+
+glm_fit <- function(glm_train, splines_dt, response, base, weight, fam, pmml_max_band = 2000) {
+  # browser()
+  splines_dt <- splines_dt %>% distinct()
+  overlay_fts_dt <- create_splines(df = glm_train %>% mutate_all(~ifelse(is.na(.), KT_calculate_mode(.), .)), splines_dt = splines_dt)
   
-  x<- model.matrix(~., data = overlay_fts_dt )
-  base = if(max(response) == 1 & min(response) == 0 ){
-    1
-  }else{
-    base
-  }
-  base_ave <- response/ base 
+  x <- model.matrix(~., data = overlay_fts_dt)
+
+  base_ave <- response / base
+
   suppressWarnings({
-  adj_fit <- fastglm(x =x , y =base_ave , weights = base*weight ,family = fam  )})
-  adj<- predict(adj_fit , newdata = x, type = "response")
+    adj_fit <- fastglm(x = x, y = base_ave, weights = base * weight, family = fam)
+  })
+  adj <- predict(adj_fit, newdata = x, type = "response")
   indiv_eff <- list()
-  for (ft in splines_dt$feature %>% unique() ){
-    excl_terms <- names(adj_fit$coefficients)[!grepl(glue("^{ft}") ,  names(adj_fit$coefficients))]
+  for (ft in splines_dt$feature %>% unique()) {
+    excl_terms <- names(adj_fit$coefficients)[!grepl(glue("^{ft}"), names(adj_fit$coefficients))]
     temp_model <- adj_fit
-    temp_model$coefficients[excl_terms[excl_terms!="(Intercept)" ] ] <- 0
-    indiv_eff[[ft]] <- predict(temp_model , newdata = x, type = "response")
+    temp_model$coefficients[excl_terms[excl_terms != "(Intercept)"]] <- 0
+    indiv_eff[[ft]] <- predict(temp_model, newdata = x, type = "response")
   }
   coefficients <- coef(adj_fit)
   
-  
   # Create data table
   result <- data.table(
-    id = gsub("`","",names(coefficients) ),
-    estimate =  coefficients
+    id = gsub("`", "", names(coefficients)),
+    estimate = coefficients
   )
-  # create rdr_lookup tables
-  imp_values = lapply(glm_train, function(x) KT_calculate_mode(x)) %>% setNames(.,names(glm_train))  
-  feature_range <- lapply(glm_train, function(x) c(min(x,na.rm = T) , max(x ,na.rm = T))) %>% setNames(.,names(glm_train))
+  
+  # create LP_model 
+  fitted_fts <- splines_dt$feature %>% unique
+  LP_models <- lapply(fitted_fts, function(ft) {
+    temp <- adj_fit
+    adj_fit$coefficients[['(Intercept)']] <- 0
+    effect_to_remove <- setdiff(fitted_fts, ft)
+    coef_name <- names(adj_fit$coefficients)
+    adj_fit$coefficients[coef_name[grepl(paste0("^", effect_to_remove, collapse = "|"), coef_name)]] <- 0
+    temp
+  }) %>% setNames(.,fitted_fts)
+  # Create rdr_lookup tables
+  imp_values <- lapply(glm_train, function(x) KT_calculate_mode(x)) %>% setNames(., names(glm_train))
+  feature_range <- lapply(glm_train, function(x) c(min(x, na.rm = TRUE), max(x, na.rm = TRUE))) %>% setNames(., names(glm_train))
   lookup_tables_list <- list()
-  result %>% left_join(splines_dt , by = "id") ->model_summary
+  band_logic_for_rdr_list <- list()
+  result %>% left_join(splines_dt, by = "id") -> model_summary
   
-  for (x in unique(model_summary$feature[!is.na(model_summary$feature)])){
-    model_summary %>% filter(feature == x)  -> temp
-    band_req <- if(unique(temp$dtype)=="integer" & sort(feature_range[[x]])[1]==0 & sort(feature_range[[x]])[2]==1 ){
-      F
-    }else{
-      T
-    }
-    x0 <- head(temp$x0_lvl_name,1)
-    x1<- tail(temp$x1_lvl_name,1)
-    combine_splines <- if (band_req){
-      seq(feature_range[[x]][1], feature_range[[x]][2] , length.out = pmml_max_band) 
-    }  else{
-      feature_range[[x]] %>% sort
-    }
+  for (x in unique(model_summary$feature[!is.na(model_summary$feature)])) {
+    model_summary %>% filter(feature == x) -> temp
     lapply(temp$id, function(y) 
-      normalize_feature(combine_splines ,
-                        min_val = temp[temp$id == y][["x0_lvl_name" ]]    ,
-                        max_val =  temp[temp$id == y][["x1_lvl_name" ]]   )*temp[temp$id == y][["estimate" ]])%>% 
-      Reduce("+" , .) -> relativity
+      normalize_feature(imp_values[[x]],
+                        min_val = temp[temp$id == y][["x0_lvl_name"]],
+                        max_val = temp[temp$id == y][["x1_lvl_name"]]) * temp[temp$id == y][["estimate"]]) %>% 
+      Reduce("+", .) -> imp_rel
     
+    band_req <- if (unique(temp$dtype) == "integer" & sort(feature_range[[x]])[1] == 0 & sort(feature_range[[x]])[2] == 1) {
+      FALSE
+    } else {
+      TRUE
+    }
     
-    lapply(temp$id, function(y) 
-      normalize_feature(imp_values[[x]] ,
-                        min_val = temp[temp$id == y][["x0_lvl_name" ]]    ,
-                        max_val =  temp[temp$id == y][["x1_lvl_name" ]]   )*temp[temp$id == y][["estimate" ]])%>% 
-      Reduce("+" , .)-> imp_rel
-    # browser()
-    lookup_table = data.table()
-    if(band_req){
-      ft <- KT_band_data(combine_splines,nbreaks = pmml_max_band,method = "equal") %>% as.character
-      paste0("<=" ,sub("\\(([^,]+),.*", "\\1", ft[1])) -> lb
-      paste0(">" ,sub(".*,([^]]+)\\]", "\\1",  ft[length(ft)])) -> ub
-      c(lb,ft,ub)->ft
-      lookup_table[, (x) := factor( c(ft , "default"))]
-      lookup_table$relativity =  c(relativity[1], relativity , relativity[length(relativity)],imp_rel)
+    if (band_req) {
+      model_summary %>%
+        filter(feature == x) %>%
+        select(x0_lvl_name, x1_lvl_name, estimate) %>%
+        rename(x0 = x0_lvl_name, x1 = x1_lvl_name) %>%
+        arrange(x0) %>%
+        mutate(range = x1 - x0,
+               prop = range / sum(range),
+               band_dist = round(pmml_max_band * prop)) %>%
+        mutate(gap = x1 - lead(x0, 1),
+               gap = ifelse(is.na(gap), 0, gap),
+               x0lag1 = lead(x0, 1)) %>%
+        rowwise() %>%
+        mutate(
+          spline = ifelse(gap == 0, list(seq(x0, x1, length.out = band_dist)), list(c(seq(x0, x1, length.out = band_dist), seq(x1, x0lag1, length.out = 2)) %>% unique)),
+          spline_norm = list(normalize_feature(spline, min_val = x0, max_val = x1)),
+          rel = list(as.vector(spline_norm)[as.vector(spline_norm) > 0] * estimate),
+          last_rel = (rel[[length(rel)]]),
+          band = list(create_pairs(spline %>% as.vector() %>% round(3)))
+        ) %>% ungroup() %>%
+        mutate(band = lapply(seq_along(band), function(x) {
+          if (length(band) == 1) {
+            c(glue("<={spline[[x]][1]}"), band[[x]], glue(">{round(tail(spline[[x]], 1), 3)}"), "default")
+          } else if (x == 1) {
+            c(glue("<={spline[[x]][1]}"), band[[x]])
+          } else if (x == length(band)) {
+            c(band[[x]], glue(">{round(tail(spline[[x]], 1), 3)}"), "default")
+          } else {
+            band[[x]]
+          }
+        }),
+        last_rel = cumsum(last_rel),
+        rel = lapply(1:length(rel), function(x) if (x == 1) { rel[[x]] } else { rel[[x]] + last_rel[x - 1] }),
+        rel = lapply(seq_along(rel), function(x) {
+          if (length(rel) == 1) {
+            c(0, rel[[x]], tail(rel[[x]], 1), imp_rel)
+          } else if (x == 1) {
+            c(0, rel[[x]])
+          } else if (x == length(rel)) {
+            c(rel[[x]], tail(rel[[x]], 1), imp_rel)
+          } else {
+            rel[[x]]
+          }
+        })
+        ) -> rel_data
+      # browser()
+      lapply(1:nrow(rel_data), function(x) data.table(band = rel_data[x,]$band %>% unlist(), relativity = rel_data[x,]$rel %>% unlist())) %>% 
+        rbindlist(.) %>% group_by(band) %>% 
+        summarise(relativity = mean(relativity)) %>% ungroup() %>%
+        mutate(band = factor(band, levels = KT_dym_sort(band)), relativity = (relativity)) %>%
+        arrange(band) %>%
+        rename({{x}} := band)   -> lookup_table
       
-    } else{
-      feature_range[[x]] %>% sort %>% as.character->ft
-      lookup_table[, (x) := factor( c(ft , "default"))]
-      lookup_table$relativity =  c(relativity,imp_rel)
+      interval <- lookup_table[[x]] %>% as.character
+      interval[2:(length(interval) - 2)] -> interval
+      
+      sub("\\(([^,]+),.*", "\\1", interval) -> lb
+      sub(".*,([^]]+)\\]", "\\1", interval) -> ub
+      
+      band_logic_for_rdr <- data.frame(
+        LO = c("<=", rep(">", length(lb)), ">", "Default"),
+        LB = c(lb[1], lb, ub[length(ub)], ""),
+        UO = c("", rep("<=", length(ub)), "", ""),
+        UB = c("", ub, "", ""),
+        ln = c(lookup_table[[x]] %>% as.character)
+      )
+      
+    } else {
+      lapply(temp$id, function(y) 
+        normalize_feature(c(0, 1),
+                          min_val = temp[temp$id == y][["x0_lvl_name"]],
+                          max_val = temp[temp$id == y][["x1_lvl_name"]]) * temp[temp$id == y][["estimate"]]) %>% 
+        Reduce("+", .) -> relativity # quick fix
+      lookup_table <- data.table()
+      feature_range[[x]] %>% sort %>% as.character -> ft
+      lookup_table[, (x) := factor(c(ft, "default"))]
+      lookup_table$relativity <- c(relativity, imp_rel)
+      band_logic_for_rdr <- data.frame(
+        LO = c("=", "=", "Default"),
+        LB = c("0", "1", ""),
+        UO = c("", "", ""),
+        UB = c("", "", ""),
+        ln = c("0", "1", "default")
+      )
     }
-
     
-    lookup_tables_list[[x]]<-lookup_table
-    
-    
+    lookup_tables_list[[x]] <- lookup_table
+    band_logic_for_rdr_list[[x]] <- band_logic_for_rdr
   }
-  intercept = model_summary[model_summary$id == "(Intercept)" ]$estimate
-  lookup_tables_list$intercept = data.table(intercept = 1, relativity =intercept )
   
-  print(glue("glm fit total run time {Sys.time() - t0}")) 
-  return(list(adj= as.numeric( adj),
-              model = adj_fit, 
-              fit = result, 
-              model =adj_fit , 
-              indiv_eff =indiv_eff , 
-              imp_values=imp_values  ,
-              feature_range = feature_range,
-              lookup_tables =lookup_tables_list ))
+  intercept <- model_summary[model_summary$id == "(Intercept)"]$estimate
+  lookup_tables_list$intercept <- data.table(intercept = 1, relativity = intercept)
+  
+  print(glue("glm fit total run time {Sys.time() - t0}"))
+  return(list(
+    adj = as.numeric(adj),
+    model = adj_fit,
+    fit = result,
+    indiv_eff = indiv_eff,
+    imp_values = imp_values,
+    feature_range = feature_range,
+    lookup_tables = lookup_tables_list,
+    band_logic_for_rdr = band_logic_for_rdr_list,
+    LP_models=LP_models
+  ))
   gc()
-  
-}  
-
+} 
+create_pairs <- function(vector) {
+  pairs <- sapply(1:(length(vector) - 1), function(i) {
+    paste0("(", vector[i], ",", vector[i + 1], "]")
+  })
+  return(pairs)
+}
 
 normalize_feature <- function(feature, min_val, max_val) {
   ifelse(feature < min_val, 0, ifelse(feature > max_val, 1, (feature - min_val) / (max_val - min_val)))
@@ -560,7 +634,7 @@ cosmetic_changes <- function(p, alpha_pt=1,alpha_line=0.5, size_pt =2, size_line
 }
 band_data <- function(x, weight = 1, nbreaks = 100, method = c("equal", "quantile")) {
   method <- match.arg(method)
-  
+  # browser()
   min_val <- min(x, na.rm = TRUE)
   max_val <- max(x, na.rm = TRUE)
   
@@ -665,9 +739,15 @@ custom_round <- function(x, digits = 2) {
   })
 }
 
-glm_spline_predict <- function(model_out , pred_df){
+glm_spline_predict <- function(model_out , pred_df, type = "response",predict_LP = F){
   pred_df <-  sapply(model_out$glm_model_out$imp_values %>% names, function(x) replace_na( pred_df[[x]] ,model_out$glm_model_out$imp_values[[x]] ) ) %>% as.data.table()
-  predict(model_out$glm_model_out$model, newdata = model.matrix(~., data = create_splines(df =pred_df,splines_dt=model_out$drawn_shapes %>% rbindlist(.)  )) , type = "response") 
-  
+  if(predict_LP){
+    lapply(model_out$glm_model_out$LP_models, function(x) predict(x, 
+                                                                  newdata = model.matrix(~., data = create_splines(df =pred_df,splines_dt=model_out$drawn_shapes %>% rbindlist(.)  )) , 
+                                                                  type = type) )%>%
+      setNames(.,names(model_out$glm_model_out$LP_models))
+  }else{
+    predict(model_out$glm_model_out$model, newdata = model.matrix(~., data = create_splines(df =pred_df,splines_dt=model_out$drawn_shapes %>% rbindlist(.)  )) , type = type) 
+  }
 }
 

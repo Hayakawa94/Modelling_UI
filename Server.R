@@ -1080,7 +1080,8 @@ server <- function(input, output, session) {
   }, {
     # browser()
     if(input$ignore_base_pred == T){
-      base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+      # base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+      base_pred = 1
     }else{
       req(base_model())
       base_pred <-  base_model()$model_output$pred
@@ -1095,53 +1096,67 @@ server <- function(input, output, session) {
     }
   })
   
-  fit_plot <- reactive({
-    
-    # browser()
-    
-    # req(base_model())
-    
-    if(input$ignore_base_pred== T){
-      base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+
+
+
+  observe({
+    data <- train[train[[config()$weight]] > 0][[input$ft]]
+    unique_values <- length(unique(data))
+    if (unique_values <= 20) {
+      updateCheckboxInput(session, "band_ft", value = FALSE)
+      hide("band_ft")
+      hide("glm_band_method")
+      hide("overlay_nbreaks")
+    } else {if(unique_values>150){
+      updateCheckboxInput(session, "band_ft", value = TRUE)
+      hide("band_ft")
+      show("glm_band_method")
+      show("overlay_nbreaks")
     }else{
-      req(input$load_Training||input$train )
+      show("band_ft")
+      show("glm_band_method")
+      show("overlay_nbreaks")
+    }
+
+    }
+
+  })
+  
+
+  fit_plot <- reactive({
+
+    
+    if (input$ignore_base_pred == TRUE) {
+      # base_pred <- sum(config()$train_y * config()$train_weight) / sum(config()$train_weight)
+      base_pred = 1
+    } else {
+      req(input$load_Training || input$train)
       req(base_model())
-      base_pred <-  base_model()$model_output$pred
+      base_pred <- base_model()$model_output$pred
     }
     
     if (is.null(overlays())) {
-      challenger = base_pred
-      indiv_eff = 1
+      challenger <- base_pred
+      indiv_eff <- 1
     } else {
-      challenger = base_pred * overlays()$adj
-      indiv_eff = if (input$ft %in% names(overlays()$indiv_eff )) {
+      challenger <- base_pred * overlays()$adj
+      indiv_eff <- if (input$ft %in% names(overlays()$indiv_eff)) {
         overlays()$indiv_eff[[input$ft]]
       } else {
         1
       }
     }
     
-    observe({
-      
-      data = train[train[[config()$weight]]>0][[input$ft]]
-      unique_values <- length(unique(data))
-      if (unique_values <=5) {
-        updateCheckboxInput(session, "band_ft", value = FALSE)
-        hide("band_ft")
-        hide("glm_band_method")
-        hide("overlay_nbreaks")
-      } else {
-        
-        show("band_ft")
-        # updateCheckboxInput(session, "band_ft", value = T)
-        show("glm_band_method")
-        show("overlay_nbreaks")
-      }
-    })
+    ft = train[train[[config()$weight]] > 0][[input$ft]]
+    if(length(unique(ft)) >150){
+      band_ft=T
+    }else{
+      band_ft = input$band_ft
+    }
     
     plot_fit(
-      ft = train[train[[config()$weight]]>0][[input$ft]],
-      actual =config()$train_y * config()$train_weight,
+      ft =ft,
+      actual = config()$train_y * config()$train_weight,
       pred = base_pred,
       challenger = challenger,
       weight = config()$train_weight,
@@ -1149,21 +1164,31 @@ server <- function(input, output, session) {
       point_size = input$size_pt,
       lwd = input$size_line,
       fit_lines = input$fit_lines,
-      ft_name= input$ft,
-      band_ft = input$band_ft,
+      ft_name = input$ft,
+      band_ft = band_ft,
       nbreaks = input$overlay_nbreaks,
       indiv_eff = indiv_eff,
       band_method = input$glm_band_method
-      
     )
   })
   
   observeEvent(input$lookup_pmml_export,{
     req(overlays())
+    exp_path <- glue("{getwd()}/{input$glm_overlay_out}_GLMpmml") 
+    if (!file.exists(exp_path)) {
+      dir.create(exp_path)
+    } else {
+      files <- list.files(exp_path, full.names = TRUE)
+      file.remove(files)
+    }
     print("exporting lookup table in pmml format")
-    KT_Export_tables_to_pmml(overlays()$lookup_tables , input$glm_overlay_out)
+    KT_Export_tables_to_pmml(overlays()$lookup_tables , input$glm_overlay_out , export_path = exp_path)
+    KT_export_to_excel(overlays()$band_logic_for_rdr ,glue("{exp_path}/band_logic_for_rdr.xlsx")  , withcolnames = F)
   })
   
+  
+  
+  #######
   output$overlay_plot <- renderPlotly({
     req(fit_plot())
     p <- ggplotly(fit_plot()) %>% layout(
@@ -1176,9 +1201,7 @@ server <- function(input, output, session) {
     )
     shapes <- drawn_shapes()[[input$ft]]
     
-    if (!is.null(shapes)) {
-      
-      
+    if (!is.null(shapes) && input$show_splines) {
       p <- p %>%
         add_segments(
           data = shapes,
@@ -1258,12 +1281,18 @@ server <- function(input, output, session) {
             }
           }
           all_shapes <- drawn_shapes()
-          all_shapes[[input$ft]] <- 
-            if(input$band_ft==T){
-              
+          
+          all_shapes[[input$ft]] <- if(input$band_ft==T){
+              # browser()
               fit_plot()$data$ft -> lvl_name
-              data.table(lvl_name = lvl_name , idx = 1:length(lvl_name) , ft = input$ft ) -> lvl_name
-              rbind(existing_shapes, new_shapes) %>% mutate( x0 =  round(x0) , x1 =   round(x1) )  %>% 
+                data.table(lvl_name = lvl_name , idx = 1:length(lvl_name) , ft = input$ft ) -> lvl_name
+              rbind(existing_shapes, new_shapes) %>% mutate( x0 =  round(x0) , x1 =   round(x1) ) %>% distinct(id,.keep_all = TRUE)  -> shape_data
+              if ( NA %in% lvl_name$lvl_name){
+                print("Cannot fit to NA level")
+                NA_idx <- lvl_name %>% filter(is.na(lvl_name)) %>% select(idx) %>% pull
+                shape_data %>% filter(!x1 %in% NA_idx) ->shape_data
+              }
+              shape_data %>% 
                 left_join(lvl_name , by = c(x0 = "idx" , "feature" = "ft") ) %>%
                 mutate(x0_lvl_name  = ifelse(overlap ==F ,  as.numeric( sub("\\(([^,]+),.*", "\\1", lvl_name)) ,  as.numeric( sub(".*,([^,]+)\\]", "\\1", lvl_name) ) )) %>% select(-lvl_name) %>%
                 left_join(lvl_name , by = c(x1 = "idx" , "feature" = "ft") ) %>%
@@ -1285,6 +1314,10 @@ server <- function(input, output, session) {
       }
     }
   })
+  
+  
+  #####
+  
   
   observeEvent(input$undo, {
     req(input$undo_shapes)
@@ -1340,7 +1373,8 @@ server <- function(input, output, session) {
   glm_model_out<- reactive({
     req(drawn_shapes(),overlays())
     if(input$ignore_base_pred== T){
-      base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+      # base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+      base_pred = 1
     }else{
       req(base_model())
       base_pred <-  base_model()$model_output$pred
@@ -1398,7 +1432,8 @@ server <- function(input, output, session) {
     set.seed(1)
     
     if(input$ignore_base_pred== T){
-      base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+      # base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+      base_pred<- 1
     }else{
       base_pred <-  base_model()$model_output$pred
     }
@@ -1507,14 +1542,21 @@ server <- function(input, output, session) {
     filtered_data$actual <- filtered_data[[config()$response]] * filtered_data[[config()$weight]]
     filtered_data$weight <- filtered_data[[config()$weight]]
     
-    suppressWarnings(calc_ave(ft = filtered_data[[input$ft]], 
+    ft = filtered_data[[input$ft]]
+    if(length(unique(ft)) >150){
+      band_ft=T
+    }else{
+      band_ft = input$band_ft
+    }
+    
+    suppressWarnings(calc_ave(ft =ft , 
                               actual = filtered_data$actual, 
                               pred = filtered_data$pred, 
                               weight = filtered_data$weight, 
                               factor_consistency = filtered_data[[input$factor_consistency]], 
                               rebase = input$rebase,
                               ft_name= input$ft,
-                              band_ft = input$band_ft,
+                              band_ft = band_ft,
                               nbreaks=input$overlay_nbreaks,
                               band_method = input$glm_band_method))
   })
@@ -1563,7 +1605,7 @@ server <- function(input, output, session) {
     
     
     gc()
-    browser()
+    # browser()
     print("Calc model performance")
     if (is.null(overlays())) {
       train_overlays_adj <- 1

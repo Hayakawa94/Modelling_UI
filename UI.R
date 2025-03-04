@@ -351,12 +351,13 @@ ui <- fluidPage(useShinyjs(),
                           ),
                           tabsetPanel(
                             tabPanel("GLM fit",
+                                     tableOutput("glm_fit"),
                                      checkboxGroupInput("fit_lines", "",
                                                         choices = c("CA_base", "CA_challenger", "obs", "CU_base", "CU_challenger" , "CM"),
                                                         selected = c("CA_challenger", "obs", "CU_challenger", "CM"),
                                                         inline = TRUE
                                      ),
-                                     tableOutput("glm_fit"),
+                                     checkboxInput("show_splines", "Show Splines", value = TRUE),
                                      plotlyOutput("overlay_plot"),
                                      plotlyOutput("avePlot")  # Placing avePlot below overlay_plot
                                      
@@ -377,7 +378,7 @@ ui <- fluidPage(useShinyjs(),
                           selectInput("tertiary_filter_feature", "Select tertiary Feature to Filter:", choices = NULL),
                           uiOutput("tertiary_filter_ui"),
                           
-                          checkboxInput("fitloess", "Fit LOESS", value = TRUE),
+                          checkboxInput("fitloess", "Fit LOESS", value = FALSE),
                           sliderInput("smooth_strength", "Smooth Strength:", value = 0.75, min = 0, max = 1),
                           actionButton("Chart_Cosmetic","AvE analysis",  class = "full-width-btn"),
                           conditionalPanel(condition = "input.Chart_Cosmetic % 2 == 1",
