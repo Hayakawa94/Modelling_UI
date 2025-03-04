@@ -1188,7 +1188,6 @@ server <- function(input, output, session) {
   
   
   
-  #######
   output$overlay_plot <- renderPlotly({
     req(fit_plot())
     p <- ggplotly(fit_plot()) %>% layout(
@@ -1234,7 +1233,7 @@ server <- function(input, output, session) {
     if (!is.null(relayout_data)) {
       if (!is.null(relayout_data[["xaxis.range[0]"]])) x_range(c(relayout_data[["xaxis.range[0]"]], relayout_data[["xaxis.range[1]"]]))
       if (!is.null(relayout_data[["yaxis.range[0]"]])) y_range(c(relayout_data[["yaxis.range[0]"]], relayout_data[["yaxis.range[1]"]]))
-      if (!is.null(relayout_data[["yaxis2.range[0]"]])) y2_range(c(relayout_data[["yaxis2.range[0]"]], relayout_data[["yaxis2.range[1]"]]))
+      if (!is.null(relayout_data[["yaxis2.range[0]"]])) y2_range(c(relayout_data[["yaxis2.range[0]"]], relayout_data[["yaxis.range[1]"]]))
       
       if (!is.null(relayout_data$shapes)) {
         shapes <- relayout_data$shapes
@@ -1242,6 +1241,15 @@ server <- function(input, output, session) {
           new_shapes <- data.frame(x0 = numeric(0), y0 = numeric(0), x1 = numeric(0), y1 = numeric(0), id = character(), feature = character(), range = character())
           for (i in seq_along(shapes$x0)) {
             if (!(shapes$x0[i] == 0 && shapes$y0[i] == 0 && shapes$x1[i] == 1 && shapes$y1[i] == 1)) {
+              if (shapes$x0[i] > shapes$x1[i]) {
+                temp <- shapes$x0[i]
+                shapes$x0[i] <- shapes$x1[i]
+                shapes$x1[i] <- temp
+                
+                temp <- shapes$y0[i]
+                shapes$y0[i] <- shapes$y1[i]
+                shapes$y1[i] <- temp
+              }
               existing_shapes <- drawn_shapes()[[input$ft]]
               overlap <- any(existing_shapes$x0 <= shapes$x1[i] & existing_shapes$x1 >= shapes$x0[i])
               if (overlap) {
@@ -1273,48 +1281,38 @@ server <- function(input, output, session) {
                                              x0_lvl_name=shapes$x0[i],
                                              x1_lvl_name=shapes$x1[i],
                                              dtype=dtype))
-              
-              
-              
-              
-              
             }
           }
           all_shapes <- drawn_shapes()
           
           all_shapes[[input$ft]] <- if(input$band_ft==T){
-              # browser()
-              fit_plot()$data$ft -> lvl_name
-                data.table(lvl_name = lvl_name , idx = 1:length(lvl_name) , ft = input$ft ) -> lvl_name
-              rbind(existing_shapes, new_shapes) %>% mutate( x0 =  round(x0) , x1 =   round(x1) ) %>% distinct(id,.keep_all = TRUE)  -> shape_data
-              if ( NA %in% lvl_name$lvl_name){
-                print("Cannot fit to NA level")
-                NA_idx <- lvl_name %>% filter(is.na(lvl_name)) %>% select(idx) %>% pull
-                shape_data %>% filter(!x1 %in% NA_idx) ->shape_data
-              }
-              shape_data %>% 
-                left_join(lvl_name , by = c(x0 = "idx" , "feature" = "ft") ) %>%
-                mutate(x0_lvl_name  = ifelse(overlap ==F ,  as.numeric( sub("\\(([^,]+),.*", "\\1", lvl_name)) ,  as.numeric( sub(".*,([^,]+)\\]", "\\1", lvl_name) ) )) %>% select(-lvl_name) %>%
-                left_join(lvl_name , by = c(x1 = "idx" , "feature" = "ft") ) %>%
-                mutate(x1_lvl_name  = as.numeric( sub(".*,([^,]+)\\]", "\\1", lvl_name) )) %>% select(-lvl_name) %>%
-                mutate_at(vars(c("x1_lvl_name" , "x0_lvl_name")   ) ,~ ifelse(dtype == "integer" , round(.x)  ,  custom_round(.x,2))  ) %>%
-                mutate(id = glue("{input$ft}_{x0_lvl_name}to{x1_lvl_name}"))
-            }else{
-              
-              # browser()
-              
-              rbind(existing_shapes, new_shapes) %>% 
-                mutate(x0_lvl_name = ifelse(dtype == "integer" , round(x0) ,  custom_round(x0,2) ) ,
-                       x1_lvl_name = ifelse(dtype == "integer" , round(x1) ,  custom_round(x1,2) ),
-                       id = glue("{input$ft}_{x0_lvl_name}to{x1_lvl_name}"))
+            fit_plot()$data$ft -> lvl_name
+            data.table(lvl_name = lvl_name , idx = 1:length(lvl_name) , ft = input$ft ) -> lvl_name
+            rbind(existing_shapes, new_shapes) %>% mutate( x0 =  round(x0) , x1 =   round(x1) ) %>% distinct(id,.keep_all = TRUE)  -> shape_data
+            if ( NA %in% lvl_name$lvl_name){
+              print("Cannot fit to NA level")
+              NA_idx <- lvl_name %>% filter(is.na(lvl_name)) %>% select(idx) %>% pull
+              shape_data %>% filter(!x1 %in% NA_idx) ->shape_data
             }
+            shape_data %>% 
+              left_join(lvl_name , by = c(x0 = "idx" , "feature" = "ft") ) %>%
+              mutate(x0_lvl_name  = ifelse(overlap ==F ,  as.numeric( sub("\\(([^,]+),.*", "\\1", lvl_name)) ,  as.numeric( sub(".*,([^,]+)\\]", "\\1", lvl_name) ) )) %>% select(-lvl_name) %>%
+              left_join(lvl_name , by = c(x1 = "idx" , "feature" = "ft") ) %>%
+              mutate(x1_lvl_name  = as.numeric( sub(".*,([^,]+)\\]", "\\1", lvl_name) )) %>% select(-lvl_name) %>%
+              mutate_at(vars(c("x1_lvl_name" , "x0_lvl_name")   ) ,~ ifelse(dtype == "integer" , round(.x)  ,  custom_round(.x,2))  ) %>%
+              mutate(id = glue("{input$ft}_{x0_lvl_name}to{x1_lvl_name}"))
+          }else{
+            rbind(existing_shapes, new_shapes) %>% 
+              mutate(x0_lvl_name = ifelse(dtype == "integer" , round(x0) ,  custom_round(x0,2) ) ,
+                     x1_lvl_name = ifelse(dtype == "integer" , round(x1) ,  custom_round(x1,2) ),
+                     id = glue("{input$ft}_{x0_lvl_name}to{x1_lvl_name}"))
+          }
           drawn_shapes(all_shapes)
           updateCheckboxGroupInput(session, "undo_shapes", choices = do.call(rbind, all_shapes)$id)
         }
       }
     }
   })
-  
   
   #####
   
