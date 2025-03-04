@@ -378,7 +378,7 @@ ui <- fluidPage(useShinyjs(),
                           selectInput("tertiary_filter_feature", "Select tertiary Feature to Filter:", choices = NULL),
                           uiOutput("tertiary_filter_ui"),
                           
-                          checkboxInput("fitloess", "Fit LOESS", value = TRUE),
+                          checkboxInput("fitloess", "Fit LOESS", value = FALSE),
                           sliderInput("smooth_strength", "Smooth Strength:", value = 0.75, min = 0, max = 1),
                           actionButton("Chart_Cosmetic","AvE analysis",  class = "full-width-btn"),
                           conditionalPanel(condition = "input.Chart_Cosmetic % 2 == 1",

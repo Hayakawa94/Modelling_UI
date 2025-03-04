@@ -1080,7 +1080,8 @@ server <- function(input, output, session) {
   }, {
     # browser()
     if(input$ignore_base_pred == T){
-      base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+      # base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+      base_pred = 1
     }else{
       req(base_model())
       base_pred <-  base_model()$model_output$pred
@@ -1109,13 +1110,10 @@ server <- function(input, output, session) {
     } else {if(unique_values>150){
       updateCheckboxInput(session, "band_ft", value = TRUE)
       hide("band_ft")
-      
       show("glm_band_method")
       show("overlay_nbreaks")
-
     }else{
       show("band_ft")
-      
       show("glm_band_method")
       show("overlay_nbreaks")
     }
@@ -1129,7 +1127,8 @@ server <- function(input, output, session) {
 
     
     if (input$ignore_base_pred == TRUE) {
-      base_pred <- sum(config()$train_y * config()$train_weight) / sum(config()$train_weight)
+      # base_pred <- sum(config()$train_y * config()$train_weight) / sum(config()$train_weight)
+      base_pred = 1
     } else {
       req(input$load_Training || input$train)
       req(base_model())
@@ -1176,13 +1175,15 @@ server <- function(input, output, session) {
   observeEvent(input$lookup_pmml_export,{
     req(overlays())
     exp_path <- glue("{getwd()}/{input$glm_overlay_out}_GLMpmml") 
-    if ( !file.exists(exp_path)){
-      
+    if (!file.exists(exp_path)) {
       dir.create(exp_path)
+    } else {
+      files <- list.files(exp_path, full.names = TRUE)
+      file.remove(files)
     }
     print("exporting lookup table in pmml format")
     KT_Export_tables_to_pmml(overlays()$lookup_tables , input$glm_overlay_out , export_path = exp_path)
-    KT_export_to_excel(overlays()$band_logic_for_rdr ,glue("{exp_path}/band_logic_for_rdr.xlsx") )
+    KT_export_to_excel(overlays()$band_logic_for_rdr ,glue("{exp_path}/band_logic_for_rdr.xlsx")  , withcolnames = F)
   })
   
   
@@ -1285,7 +1286,7 @@ server <- function(input, output, session) {
               # browser()
               fit_plot()$data$ft -> lvl_name
                 data.table(lvl_name = lvl_name , idx = 1:length(lvl_name) , ft = input$ft ) -> lvl_name
-              rbind(existing_shapes, new_shapes) %>% mutate( x0 =  round(x0) , x1 =   round(x1) )  -> shape_data
+              rbind(existing_shapes, new_shapes) %>% mutate( x0 =  round(x0) , x1 =   round(x1) ) %>% distinct(id,.keep_all = TRUE)  -> shape_data
               if ( NA %in% lvl_name$lvl_name){
                 print("Cannot fit to NA level")
                 NA_idx <- lvl_name %>% filter(is.na(lvl_name)) %>% select(idx) %>% pull
@@ -1372,7 +1373,8 @@ server <- function(input, output, session) {
   glm_model_out<- reactive({
     req(drawn_shapes(),overlays())
     if(input$ignore_base_pred== T){
-      base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+      # base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+      base_pred = 1
     }else{
       req(base_model())
       base_pred <-  base_model()$model_output$pred
@@ -1430,7 +1432,8 @@ server <- function(input, output, session) {
     set.seed(1)
     
     if(input$ignore_base_pred== T){
-      base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+      # base_pred <- sum(config()$train_y*config()$train_weight)/sum(config()$train_weight)
+      base_pred<- 1
     }else{
       base_pred <-  base_model()$model_output$pred
     }
@@ -1539,14 +1542,21 @@ server <- function(input, output, session) {
     filtered_data$actual <- filtered_data[[config()$response]] * filtered_data[[config()$weight]]
     filtered_data$weight <- filtered_data[[config()$weight]]
     
-    suppressWarnings(calc_ave(ft = filtered_data[[input$ft]], 
+    ft = filtered_data[[input$ft]]
+    if(length(unique(ft)) >150){
+      band_ft=T
+    }else{
+      band_ft = input$band_ft
+    }
+    
+    suppressWarnings(calc_ave(ft =ft , 
                               actual = filtered_data$actual, 
                               pred = filtered_data$pred, 
                               weight = filtered_data$weight, 
                               factor_consistency = filtered_data[[input$factor_consistency]], 
                               rebase = input$rebase,
                               ft_name= input$ft,
-                              band_ft = input$band_ft,
+                              band_ft = band_ft,
                               nbreaks=input$overlay_nbreaks,
                               band_method = input$glm_band_method))
   })
