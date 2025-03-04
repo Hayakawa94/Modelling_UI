@@ -286,18 +286,16 @@ create_splines <- function(df,splines_dt){
   return(overlay_fts_dt %>% select(-idx))
 }
 Sys.time() -> t0
+
 glm_fit <- function(glm_train, splines_dt, response, base, weight, fam, pmml_max_band = 2000) {
   # browser()
   splines_dt <- splines_dt %>% distinct()
   overlay_fts_dt <- create_splines(df = glm_train %>% mutate_all(~ifelse(is.na(.), KT_calculate_mode(.), .)), splines_dt = splines_dt)
   
   x <- model.matrix(~., data = overlay_fts_dt)
-  # base = if(max(response) == 1 & min(response) == 0 ){
-  #   1
-  # }else{
-  #   base
-  # }
+
   base_ave <- response / base
+
   suppressWarnings({
     adj_fit <- fastglm(x = x, y = base_ave, weights = base * weight, family = fam)
   })
