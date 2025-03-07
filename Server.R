@@ -12,8 +12,8 @@ server <- function(input, output, session) {
     dtype = lapply(fts, function(x) class(train[[x]]))  %>% as.character(),
     Use_Feature = rep(FALSE, length(fts)),
     Monotonicity = rep(0, length(fts)),
-    Interaction_Constraints = rep(FALSE, length(fts)),
-    stringsAsFactors = FALSE
+    Interaction_Constraints = rep(FALSE, length(fts))
+    # stringsAsFactors = FALSE
   ) %>% arrange(Features)
   
   observeEvent(input$kfold, {
@@ -108,20 +108,21 @@ server <- function(input, output, session) {
   
   # Reactive value to store the table data
   table_data <- reactiveVal(initial_data)
-  
   output$ft_table <- renderRHandsontable({
     rhandsontable(table_data(), useTypes = TRUE) %>%
       hot_col("Use_Feature", type = "checkbox") %>%
       hot_col("Monotonicity", type = "dropdown", source = c(-1, 0, 1)) %>%
       hot_col("Interaction_Constraints", type = "checkbox")
   })
+
+
   
   observeEvent(input$reset_ft_selection ,{
     table_data(initial_data)
   })
   
   
-  outputOptions(output, "ft_table", suspendWhenHidden = FALSE)
+  outputOptions(output, "ft_table", suspendWhenHidden = F)
   
   
   correlation <-reactive({
@@ -1326,15 +1327,15 @@ server <- function(input, output, session) {
       all_shapes[[ft]] <- shapes
     }
     drawn_shapes(all_shapes)
-    updateCheckboxGroupInput(session, "undo_shapes", choices = do.call(rbind, all_shapes)$id)
+    updateCheckboxGroupInput(session, "undo_shapes", choices = sort(do.call(rbind, all_shapes)$id))
   })
   
   output$glm_fit <- renderTable({
     all_shapes <- drawn_shapes()
-    if (is.null(overlays())) {
-      do.call(rbind, all_shapes)%>% select(-x0,-x1 , -y0 , -y1 , -x1_lvl_name , -x0_lvl_name )
+     if (is.null(overlays())) {
+      do.call(rbind, all_shapes)%>% select(-x0,-x1 , -y0 , -y1 , -x1_lvl_name , -x0_lvl_name )%>% arrange(id )
     } else {
-      do.call(rbind, all_shapes) %>% left_join(overlays()$fit, by = "id") %>% select(-x0,-x1 , -y0 , -y1 , -x1_lvl_name , -x0_lvl_name )
+      do.call(rbind, all_shapes) %>% left_join(overlays()$fit, by = "id") %>% select(-x0,-x1 , -y0 , -y1 , -x1_lvl_name , -x0_lvl_name )%>% arrange(id , estimate)
     }
   })
   
@@ -1345,7 +1346,7 @@ server <- function(input, output, session) {
   
   observeEvent(input$reset, {
     drawn_shapes(list())
-    updateCheckboxGroupInput(session, "undo_shapes", choices = NULL)
+    updateCheckboxGroupInput(session, "undo_shapes", choices = c())
   })
   
   output$overlayfit_download <- downloadHandler(
@@ -1387,7 +1388,7 @@ server <- function(input, output, session) {
     req(file.exists(paste0(input$glm_overlay_out, ".rds")))
     loaded_data <- readRDS(paste0(input$glm_overlay_out, ".rds"))
     drawn_shapes(loaded_data$drawn_shapes)
-    updateCheckboxGroupInput(session, "undo_shapes", choices = do.call(rbind, loaded_data$drawn_shapes)$id, selected = loaded_data$undo_shapes)
+    updateCheckboxGroupInput(session, "undo_shapes", choices = sort(do.call(rbind, loaded_data$drawn_shapes)$id), selected = loaded_data$undo_shapes)
   })
   
   # AvE

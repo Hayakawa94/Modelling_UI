@@ -360,19 +360,19 @@ glm_fit <- function(glm_train, splines_dt, response, base, weight, fam, pmml_max
                x0lag1 = lead(x0, 1)) %>%
         rowwise() %>%
         mutate(
-          spline = ifelse(gap == 0, list(seq(x0, x1, length.out = band_dist)), list(c(seq(x0, x1, length.out = band_dist), seq(x1, x0lag1, length.out = 2)) %>% unique)),
+          spline = ifelse(gap == 0, list(seq(x0, x1, length.out = band_dist) %>% round(3) %>% unique), list(c(seq(x0, x1, length.out = band_dist), seq(x1, x0lag1, length.out = 2))  %>% round(3)%>% unique)),
           spline_norm = list(normalize_feature(spline, min_val = x0, max_val = x1)),
           rel = list(as.vector(spline_norm)[as.vector(spline_norm) > 0] * estimate),
           last_rel = (rel[[length(rel)]]),
-          band = list(create_pairs(spline %>% as.vector() %>% round(3)))
+          band = list(create_pairs(spline %>% as.vector() ))
         ) %>% ungroup() %>%
         mutate(band = lapply(seq_along(band), function(x) {
           if (length(band) == 1) {
-            c(glue("<={spline[[x]][1]}"), band[[x]], glue(">{round(tail(spline[[x]], 1), 3)}"), "default")
+            c(glue("<={spline[[x]][1]}"), band[[x]], glue(">{tail(spline[[x]], 1)}"), "default")
           } else if (x == 1) {
             c(glue("<={spline[[x]][1]}"), band[[x]])
           } else if (x == length(band)) {
-            c(band[[x]], glue(">{round(tail(spline[[x]], 1), 3)}"), "default")
+            c(band[[x]], glue(">{tail(spline[[x]], 1)}"), "default")
           } else {
             band[[x]]
           }
