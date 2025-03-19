@@ -2,24 +2,39 @@ source("H:/Restricted Share/DA P&U/Tech Modelling/Users/Khoa/RPMtools/RPMtools.R
 
 library("flexdashboard")
 
+
 summarise_dataframe <- function(df) {
   gc()
   summary <- data.frame(
     Feature = character(),
     Min = numeric(),
     Max = numeric(),
-    Mode = numeric(),
+    Mode = character(),
     Proportion_Missing = numeric(),
     Data_Type = character(),
+    Levels = character(),
     stringsAsFactors = FALSE
   )
   
   for (col in colnames(df)) {
-    min_val <- min(df[[col]], na.rm = TRUE)
-    max_val <- max(df[[col]], na.rm = TRUE)
-    mode_val <- as.numeric(names(sort(table(df[[col]]), decreasing = TRUE)[1]))
-    proportion_missing <- mean(is.na(df[[col]]))
     data_type <- class(df[[col]])
+    if (data_type %in% c("numeric", "integer")) {
+      min_val <- min(df[[col]], na.rm = TRUE)
+      max_val <- max(df[[col]], na.rm = TRUE)
+      mode_val <- as.numeric(names(sort(table(df[[col]]), decreasing = TRUE)[1]))
+      levels_val <- NA
+    } else if (data_type == "factor") {
+      min_val <- NA
+      max_val <- NA
+      mode_val <- names(sort(table(df[[col]]), decreasing = TRUE)[1])
+      levels_val <- paste(levels(df[[col]]), collapse = ", ")
+    } else {
+      min_val <- NA
+      max_val <- NA
+      mode_val <- NA
+      levels_val <- NA
+    }
+    proportion_missing <- mean(is.na(df[[col]]))
     
     summary <- rbind(summary, data.frame(
       Feature = col,
@@ -27,7 +42,8 @@ summarise_dataframe <- function(df) {
       Max = max_val,
       Mode = mode_val,
       Proportion_Missing = proportion_missing,
-      Data_Type = data_type
+      Data_Type = data_type,
+      Levels = levels_val
     ))
   }
   
@@ -246,7 +262,7 @@ train_model <- function(fts,
   else{
     explain_result <- KT_xgb_explain(model = train_result$model, pred_data = sample_result$train %>% select(fts) )
     
-    pred <- predict(train_result$model ,newdata =as.matrix(train %>% select(fts))   , type  = "response")
+    pred <- predict(train_result$model ,newdata =as.matrix( mltools::one_hot(train %>% select(fts) , train %>% select(fts) %>%  select_if(is.factor) %>% names)    )   , type  = "response")
     
     
     return(list(imp_plot = list(imp_gain   = train_result$imp_plot,
@@ -264,7 +280,7 @@ train_model <- function(fts,
                        interaction_effect = explain_result$interaction ),
     model =train_result$model,
     pred = pred,
-    pmml_fmap =    r2pmml::as.fmap(as.matrix(sample_result$train %>% select(train_result$model$feature_names)))))
+    pmml_fmap =    r2pmml::as.fmap(as.data.table(sample_result$train %>% select(fts)))))
   }
   gc()
 }
@@ -314,15 +330,14 @@ glm_fit <- function(glm_train, splines_dt, response, base, weight, fam, pmml_max
     id = gsub("`", "", names(coefficients)),
     estimate = coefficients
   )
-  
   # create LP_model 
   fitted_fts <- splines_dt$feature %>% unique
   LP_models <- lapply(fitted_fts, function(ft) {
     temp <- adj_fit
-    adj_fit$coefficients[['(Intercept)']] <- 0
+    temp$coefficients[['(Intercept)']] <- 0
     effect_to_remove <- setdiff(fitted_fts, ft)
-    coef_name <- names(adj_fit$coefficients)
-    adj_fit$coefficients[coef_name[grepl(paste0("^", effect_to_remove, collapse = "|"), coef_name)]] <- 0
+    coef_name <- names(temp$coefficients)
+    temp$coefficients[coef_name[grepl(paste0("^", effect_to_remove, collapse = "|"), coef_name)]] <- 0
     temp
   }) %>% setNames(.,fitted_fts)
   # Create rdr_lookup tables
@@ -360,7 +375,9 @@ glm_fit <- function(glm_train, splines_dt, response, base, weight, fam, pmml_max
                x0lag1 = lead(x0, 1)) %>%
         rowwise() %>%
         mutate(
-          spline = ifelse(gap == 0, list(seq(x0, x1, length.out = band_dist) %>% round(3) %>% unique), list(c(seq(x0, x1, length.out = band_dist), seq(x1, x0lag1, length.out = 2))  %>% round(3)%>% unique)),
+          spline = ifelse(gap == 0, 
+                          list(seq(x0, x1, length.out = band_dist) %>% round(3) %>% unique), 
+                          list(c(seq(x0, x1, length.out = band_dist), seq(x1, x0lag1, length.out = 2))  %>% round(3)%>% unique)),
           spline_norm = list(normalize_feature(spline, min_val = x0, max_val = x1)),
           rel = list(as.vector(spline_norm)[as.vector(spline_norm) > 0] * estimate),
           last_rel = (rel[[length(rel)]]),
@@ -563,7 +580,7 @@ calc_ave <- function(ft, actual, pred, weight, challenger, factor_consistency,ft
     ft
   }
   
-  
+  # browser()
   df <- data.table(ft =ft,
                    actual = actual,
                    pred = pred,
@@ -722,8 +739,6 @@ EDA_plot <- function(agg_df,
   if(smooth_strength >0){
     p<-p+geom_smooth( aes(y = y, color = interaction), method = "loess", span = smooth_strength, se = FALSE)
   }
-  
-  
   
   gc()
   p

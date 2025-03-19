@@ -6,7 +6,7 @@ source("H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelli
 
 
 server <- function(input, output, session) {
-  # browser()
+  train <-cbind(train , one_hot(train %>% select_if(is.factor)))
   initial_data <- data.frame(
     Features = fts,
     dtype = lapply(fts, function(x) class(train[[x]]))  %>% as.character(),
@@ -55,7 +55,7 @@ server <- function(input, output, session) {
     response = model_spec[[input$model]]$response
     objective =  model_spec[[input$model]]$objective
     eval_metric = model_spec[[input$model]]$eval_metric
-    train <- train[train[[weight]] >0 ]  %>% mltools::one_hot()
+    train <- train[train[[weight]] >0 ]
     train_y <- train[[response]]
     train_weight <- train[[weight]]
     train$none = "NA"
@@ -993,11 +993,11 @@ server <- function(input, output, session) {
       output$action_message_training <- renderText("File not found.")
     }
   }
-  
   observeEvent(input$train , {
     req(train_result())
     r2pmml::r2pmml(train_result()$model, glue("{input$file_name_Training}.pmml") , fmap = train_result()$pmml_fmap  , response_name = "prediction")
   } )
+  
   
   observeEvent(train_result() ,{
     
@@ -1092,6 +1092,7 @@ server <- function(input, output, session) {
     }
     fam = model_spec[[input$model]]$fam
     splines_dt <- do.call(rbind, drawn_shapes())
+    glm_train <- train[train[[config()$weight]]>0] %>% select(unique(splines_dt$feature))
     if (nrow(splines_dt) > 0 && !is.null(splines_dt)) {
       glm_fit(glm_train, splines_dt, config()$train_y,base_pred, config()$train_weight, fam)
     } else {
@@ -1310,7 +1311,7 @@ server <- function(input, output, session) {
                      x1_lvl_name = ifelse(dtype == "integer" , round(x1) ,  custom_round(x1,2) ),
                      id = glue("{input$ft}_{x0_lvl_name}to{x1_lvl_name}"))
           }
-          drawn_shapes(all_shapes)
+          drawn_shapes(all_shapes) 
           updateCheckboxGroupInput(session, "undo_shapes", choices = do.call(rbind, all_shapes)$id)
         }
       }
@@ -1319,6 +1320,17 @@ server <- function(input, output, session) {
   
   #####
   
+  observe({
+    if(!is.numeric(train[[input$ft]])){
+      updateCheckboxInput(session = session,"draw_mode" ,value = F)
+      hide("draw_mode")
+      hide("reset")
+    }else{
+      updateCheckboxInput(session = session,"draw_mode" ,value = T)
+      show("draw_mode")
+      show("reset")
+    }
+  })
   
   observeEvent(input$undo, {
     req(input$undo_shapes)
@@ -1408,18 +1420,22 @@ server <- function(input, output, session) {
   })
   
   glm_ft_list <- reactive( {
-    
+    default_lst <- train %>% select(starts_with(fts)) %>% names %>% sort
     if(input$ignore_base_pred==T){
+      return(default_lst )
     }else{
       req(file.exists(glue("{input$file_name_Training}.rds")))
       req(base_model() )
+      gbm_fts <- train %>% select(starts_with(config()$selected_fts)  ) %>% names
       
-      gbm_fts <- config()$selected_fts
-      lapply(fts, function(x) 
+      
+      
+      
+      lapply(default_lst, function(x) 
         if(x %in% gbm_fts){paste(x , "(xgb fitted)" , " ")
         } else{x} )  %>% unlist() -> lab
       
-      return(lapply(fts, function(x) x) %>% setNames(.,lab) )
+      return(lapply(default_lst, function(x) x) %>% setNames(.,lab) )
     }
   })
   
@@ -1441,7 +1457,7 @@ server <- function(input, output, session) {
     }
     
     df_sample = train[train[[config()$weight]] > 0 ] %>% 
-      select(fts,c(config()$weight, config()$response )) %>%
+      select(starts_with( c(fts,config()$weight, config()$response ))) %>%
       mutate(pred =  challenger,
              none  = "NA") %>% sample_frac(input$samplesize) 
     
