@@ -55,7 +55,7 @@ server <- function(input, output, session) {
     response = model_spec[[input$model]]$response
     objective =  model_spec[[input$model]]$objective
     eval_metric = model_spec[[input$model]]$eval_metric
-    train <- train[train[[weight]] >0 ]
+    train <- train[train[[weight]] >0 ]  %>% mltools::one_hot()
     train_y <- train[[response]]
     train_weight <- train[[weight]]
     train$none = "NA"
@@ -994,7 +994,10 @@ server <- function(input, output, session) {
     }
   }
   
-  
+  observeEvent(input$train , {
+    req(train_result())
+    r2pmml::r2pmml(train_result()$model, glue("{input$file_name_Training}.pmml") , fmap = train_result()$pmml_fmap  , response_name = "prediction")
+  } )
   
   observeEvent(train_result() ,{
     
@@ -1089,7 +1092,6 @@ server <- function(input, output, session) {
     }
     fam = model_spec[[input$model]]$fam
     splines_dt <- do.call(rbind, drawn_shapes())
-    glm_train <- train[train[[config()$weight]]>0] %>% select(unique(splines_dt$feature))
     if (nrow(splines_dt) > 0 && !is.null(splines_dt)) {
       glm_fit(glm_train, splines_dt, config()$train_y,base_pred, config()$train_weight, fam)
     } else {
@@ -1408,16 +1410,11 @@ server <- function(input, output, session) {
   glm_ft_list <- reactive( {
     
     if(input$ignore_base_pred==T){
-      return(fts)
     }else{
       req(file.exists(glue("{input$file_name_Training}.rds")))
       req(base_model() )
       
-      gbm_fts <-base_model()$model_output$model$feature_names
-      
-      
-      
-      
+      gbm_fts <- config()$selected_fts
       lapply(fts, function(x) 
         if(x %in% gbm_fts){paste(x , "(xgb fitted)" , " ")
         } else{x} )  %>% unlist() -> lab
