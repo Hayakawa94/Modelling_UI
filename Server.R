@@ -6,7 +6,11 @@ source("H:/Restricted Share/DA P&U/Tech Modelling/01 Home/Phase 2/15 R&D/Modelli
 
 
 server <- function(input, output, session) {
-  train <-cbind(train , one_hot(train %>% select_if(is.factor)))
+  train <- if(length(train %>% select_if(is.factor)%>% names) >0   ){
+    cbind(train , one_hot(train %>% select_if(is.factor)))
+  }else{
+    train
+  }
   initial_data <- data.frame(
     Features = fts,
     dtype = lapply(fts, function(x) class(train[[x]]))  %>% as.character(),
@@ -1728,7 +1732,7 @@ server <- function(input, output, session) {
                  nbin = input$lift_plot_bin,
                  title = "lift plot train"   ) $plot$lift_plot +theme_light(base_size = 18)  -> lift_train
     print("calc test performance")
-    
+
     KT_resample_gini(n = input$n_resample,
                      actual = config()$test_y * config()$test_weight ,
                      weight =  config()$test_weight ,
